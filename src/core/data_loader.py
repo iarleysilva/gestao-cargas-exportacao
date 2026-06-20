@@ -39,12 +39,11 @@ def carregar_e_tratar_dados():
 
 def carregar_dados_separacao():
     """
-    [MÓDULO: DEMANDA SEPARAÇÃO]
-    Carrega a aba de Sequenciamento e retorna também a data de atualização da célula A3.
+    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE]
+    Carrega os dados mapeando estritamente a nova aba oficial 'Sequenciamento_Exportação_v1' 
+    identificando a coluna TURNO_REAL de forma prioritária.
     """
-    ID_PUB = "2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-"
-    GID_ABA = "1997007052"
-    url = f"https://docs.google.com/spreadsheets/d/e/{ID_PUB}/pub?output=csv&gid={GID_ABA}"
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=2016672411&single=true&output=csv"
     
     ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"
@@ -61,36 +60,53 @@ def carregar_dados_separacao():
 
     try:
         df = pd.read_csv(url)
+        # Remove espaços extras dos nomes originais das colunas antes de converter
+        df.columns = [str(c).strip() for c in df.columns]
+        
         df_real = pd.DataFrame()
         
-        if 'STATUS' in df.columns:
-            df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
-        else:
-            df_real['STATUS'] = df.iloc[:, 9].astype(str).str.strip().str.upper()
-
-        if 'Percurso' in df.columns:
+        # 1. PERCURSO (Chave Principal)
+        if 'PERCURSO' in df.columns:
+            df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
+        elif 'Percurso' in df.columns:
             df_real['PERCURSO'] = df['Percurso'].astype(str).str.strip().str.replace('.0', '', regex=False)
         else:
             df_real['PERCURSO'] = df.iloc[:, 1].astype(str).str.strip().str.replace('.0', '', regex=False)
+
+        # 2. STATUS
+        df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper() if 'STATUS' in df.columns else "SEQUENCIADO"
         
-        df_real['DT_1_FIRME'] = pd.to_datetime(df.iloc[:, 2], format='mixed', errors='coerce')
-        df_real['DT_PERCURSO'] = pd.to_datetime(df.iloc[:, 5], format='mixed', errors='coerce')
-        df_real['DT_SEQUENCIADO'] = pd.to_datetime(df.iloc[:, 7], format='mixed', errors='coerce') 
+        # 3. DATAS
+        df_real['DT_1_FIRME'] = pd.to_datetime(df['DATA 1º FIRME'], errors='coerce') if 'DATA 1º FIRME' in df.columns else pd.to_datetime(pd.Timestamp.now().date())
+        df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], errors='coerce') if 'DT PERCURSO' in df.columns else df_real['DT_1_FIRME']
         
-        cxs = pd.to_numeric(df.iloc[:, 3], errors='coerce').fillna(0)
-        pls = pd.to_numeric(df.iloc[:, 4], errors='coerce').fillna(0)
+        if 'DATA SEQUENCIADO' in df.columns:
+            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
+        else:
+            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], errors='coerce') if 'PROGRAMADO' in df.columns else df_real['DT_1_FIRME']
+        
+        # 4. VOLUMES
+        cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0) if 'CXS' in df.columns else 0
+        pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0) if 'PLS' in df.columns else 0
         df_real['VOLUME_TOTAL'] = (cxs + pls).astype(int)
         
-        df_real['CONTROLE_TACTICO'] = df.iloc[:, 0].astype(str).str.strip()
-        df_real['TURNO_ALOCADO'] = df.iloc[:, 8].astype(str).str.strip()
+        # 5. MAPEAMENTO DO TURNO (Tratando a nova coluna TURNO_REAL)
+        colunas_turno_possiveis = ['TURNO_REAL', 'TURNO REAL', 'TURNO_REALIZOU', 'TURNO']
+        col_turno_encontrada = next((c for c in colunas_turno_possiveis if c in df.columns), None)
         
+        if col_turno_encontrada:
+            df_real['TURNO_ALOCADO'] = pd.to_numeric(df[col_turno_encontrada], errors='coerce').fillna(1.0).astype(str).str.strip()
+            df_real['TURNO_ALOCADO'] = df_real['TURNO_ALOCADO'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
+        else:
+            df_real['TURNO_ALOCADO'] = "1.0"
+        
+        # Filtra linhas vazias
         df_real = df_real.dropna(subset=['PERCURSO'])
         df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
-        df_real = df_real[df_real['VOLUME_TOTAL'] > 0]
         
         return df_real, data_corte_separacao, dt_a3_str
     except Exception as e:
-        st.error(f"Erro no mapeamento dos dados: {e}")
+        st.error(f"Erro no mapeamento unificado da aba com TURNO_REAL: {e}")
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
@@ -108,11 +124,8 @@ def carregar_execucao_turnos():
         try:
             df = pd.read_csv(url)
             if not df.empty:
-                # Transforma todos os cabeçalhos em maiúsculas eliminando espaços laterais invisíveis
                 df.columns = [str(c).strip().upper() for c in df.columns]
-                
-                # Faz a varredura inteligente procurando qualquer coluna que possua "PERCURSO" no nome
-                col_percurso = next((c for c in df.columns if "PERCURSO" in c), None)
+                col_percurso = next((cHeader for cHeader in df.columns if "PERCURSO" in cHeader), None)
                 
                 if col_percurso:
                     df_turno = pd.DataFrame()
@@ -184,8 +197,9 @@ def carregar_realizado_ht(ano_selecionado="2026"):
 
 def carregar_dados_lastras_novas():
     """
-    [MÓDULO: LASTRAS]
-    Puxa o histórico de bipes realizados e a NOVA aba unificada de planejamento de Lastras.
+    [MÓDULO: LASTRAS & SEPARAÇÃO ME V1]
+    Busca os dados diretamente da nova aba unificada 'Sequenciamento_Exportação_v1'
+    vinculada diretamente ao seu link CSV de alta performance.
     """
     url_bipes = {
         "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
@@ -193,7 +207,7 @@ def carregar_dados_lastras_novas():
         "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
     }
     
-    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/1vLyusstssHb_6mj7JUq-aXwnTweqPxxSD5DxhISB1Q0/export?format=csv&gid=2016672411"
+    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=2016672411&single=true&output=csv"
     
     lista_turnos = []
     for t_nome in ["TURNO 1", "TURNO 2", "TURNO 3"]:
@@ -224,9 +238,18 @@ def carregar_dados_lastras_novas():
         df_tec = pd.read_csv(URL_NOVA_LASTRA)
         df_tec.columns = [str(c).strip().upper() for c in df_tec.columns]
         
-        df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['DATA_SEQUENCIADO'], errors='coerce')
+        if 'DATA SEQUENCIADO' in df_tec.columns:
+            df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
+        else:
+            df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['PROGRAMADO'], errors='coerce')
+            
         df_tec['PERCURSO_CHAVE'] = df_tec['PERCURSO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df_tec['TURNO_CHAVE'] = df_tec['TURNO_ALOCADO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        
+        if 'TURNO' in df_tec.columns:
+            df_tec['TURNO_CHAVE'] = pd.to_numeric(df_tec['TURNO'], errors='coerce').fillna(1.0).astype(str).str.strip()
+            df_tec['TURNO_CHAVE'] = df_tec['TURNO_CHAVE'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
+        else:
+            df_tec['TURNO_CHAVE'] = "1.0"
         
         for col in ['120X270', '160 X 160', 'PC', 'M2', 'PESO BRUTO']:
             if col in df_tec.columns:
@@ -235,5 +258,5 @@ def carregar_dados_lastras_novas():
                 df_tec[col] = 0
         return df_realizado, df_tec
     except Exception as e:
-        st.error(f"Erro ao mapear a nova aba de Lastras: {e}")
+        st.error(f"Erro ao mapear a nova aba de Sequenciamento v1: {e}")
         return df_realizado, pd.DataFrame()
