@@ -97,7 +97,7 @@ def carregar_dados_separacao():
 def carregar_execucao_turnos():
     """
     [MÓDULO: DEMANDA SEPARAÇÃO]
-    Carrega os turnos para checar o MATCH dos percursos.
+    Carrega os turnos limpando e normalizando os cabeçalhos para garantir o MATCH do Percurso Puro.
     """
     ID_PUB_TURNOS = "2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw"
     GIDS = {"TURNO 1": "0", "TURNO 2": "1250180014", "TURNO 3": "1415290687"}
@@ -107,11 +107,18 @@ def carregar_execucao_turnos():
         url = f"https://docs.google.com/spreadsheets/d/e/{ID_PUB_TURNOS}/pub?output=csv&gid={gid}"
         try:
             df = pd.read_csv(url)
-            if not df.empty and 'PERCURSO' in df.columns:
-                df_turno = pd.DataFrame()
-                df_turno['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
-                df_turno['TURNO_REALIZOU'] = turno
-                df_consolidado.append(df_turno)
+            if not df.empty:
+                # Transforma todos os cabeçalhos em maiúsculas eliminando espaços laterais invisíveis
+                df.columns = [str(c).strip().upper() for c in df.columns]
+                
+                # Faz a varredura inteligente procurando qualquer coluna que possua "PERCURSO" no nome
+                col_percurso = next((c for c in df.columns if "PERCURSO" in c), None)
+                
+                if col_percurso:
+                    df_turno = pd.DataFrame()
+                    df_turno['PERCURSO'] = df[col_percurso].astype(str).str.strip().str.replace('.0', '', regex=False)
+                    df_turno['TURNO_REALIZOU'] = turno
+                    df_consolidado.append(df_turno)
         except Exception:
             continue
             
@@ -124,7 +131,6 @@ def carregar_realizado_ht(ano_selecionado="2026"):
     """
     [MÓDULO: REALIZADO HT]
     Carrega a aba de tratamentos realizados sem perda de linhas por falha de tipo.
-    Garante que strings de data sejam interpretadas na raça para não sumir com ciclos.
     """
     ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     GIDS_ANOS = {"2026": "1740948393", "2027": "1740948393"}
@@ -133,7 +139,6 @@ def carregar_realizado_ht(ano_selecionado="2026"):
     url = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid={gid}"
     
     try:
-        # Força o carregamento como TEXTO PURO (string) para evitar drop de linhas implícito
         df = pd.read_csv(url, dtype=str)
         if df.empty: return None
         
@@ -145,34 +150,23 @@ def carregar_realizado_ht(ano_selecionado="2026"):
         df_realizado['PERCURSO_RAW'] = df['Percurso'].fillna('').astype(str).str.strip().str.replace('.0', '', regex=False)
         df_realizado['PALLETS'] = pd.to_numeric(df['Pallets'], errors='coerce').fillna(0).astype(int)
         
-        # Armazena o texto nativo digitado na célula de data
         txt_data_original = df['data produção ini'].fillna('').astype(str).str.strip()
-        
-        # Tenta conversão nativa do pandas
         df_realizado['DATA_PROD'] = pd.to_datetime(txt_data_original, format='mixed', errors='coerce')
         
-        # Extração manual do mês para linhas onde o datetime faliu (Tratamento Anti-Limbo)
         def processar_mes_linha(row):
             if pd.notna(row['DATA_PROD']):
                 return row['DATA_PROD'].month
             
-            # Se virou NaT, quebra o texto bruto ("DD/MM/AAAA") para achar o mês
             idx = row.name
             string_data = txt_data_original.iloc[idx] if idx < len(txt_data_original) else ""
             partes = string_data.split('/')
             if len(partes) >= 2:
-                try:
-                    return int(partes[1])
-                except:
-                    pass
-            return 6 # Fallback seguro para o mês corrente de análise
+                try: return int(partes[1])
+                except: pass
+            return 6
             
         df_realizado['NUM_MES'] = df_realizado.apply(processar_mes_linha, axis=1)
-        
-        # Preenche datas nulas com o dia de hoje para o pandas não ejetar a linha do DataFrame
-        df_realizado['DATA_PROD'] = df_realizado['DATA_PROD'].fillna(pd.Timestamp.now().normalize())
-        
-        # Critério de limpeza: Só joga fora se o ID do ciclo (CONCAT) estiver vazio de verdade
+        df_realizado['DATA_PROD'] = df_realizado['DATA_PROD'].fillna(pd.Timestamp.normalize(pd.Timestamp.now()))
         df_realizado = df_realizado[df_realizado['CONCAT'] != '']
         df_realizado = df_realizado[df_realizado['CONCAT'] != 'nan']
         
@@ -182,8 +176,64 @@ def carregar_realizado_ht(ano_selecionado="2026"):
             return "ESTRADO"
             
         df_realizado['TIPO_FLUXO'] = df_realizado['PERCURSO_RAW'].apply(classificar_tipo)
-        
         return df_realizado
     except Exception as e:
         st.error(f"Erro crítico no motor data_loader (Módulo 5): {e}")
         return None
+
+
+def carregar_dados_lastras_novas():
+    """
+    [MÓDULO: LASTRAS]
+    Puxa o histórico de bipes realizados e a NOVA aba unificada de planejamento de Lastras.
+    """
+    url_bipes = {
+        "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
+        "TURNO 2": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1250180014&single=true&output=csv",
+        "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
+    }
+    
+    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/1vLyusstssHb_6mj7JUq-aXwnTweqPxxSD5DxhISB1Q0/export?format=csv&gid=2016672411"
+    
+    lista_turnos = []
+    for t_nome in ["TURNO 1", "TURNO 2", "TURNO 3"]:
+        try:
+            df = pd.read_csv(url_bipes[t_nome])
+            df.columns = [str(c).strip().upper() for c in df.columns]
+            data_col = next(c for c in df.columns if "DATA" in c)
+            df['DATA_REF'] = pd.to_datetime(df[data_col], dayfirst=True, errors='coerce')
+            df['TURNO_ID'] = t_nome.split()[-1]
+            per_col = next(c for c in df.columns if "PERCURSO" in c)
+            df['PERCURSO_LIMP'] = df[per_col].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            
+            c_mi = next((c for c in df.columns if "MI" in c and "TOTAL" in c), None)
+            c_me = next((c for c in df.columns if "ME" in c and "TOTAL" in c), None)
+            c_gat = next((c for c in df.columns if "LASTRA" in c and "ACESSOS" in c), None)
+            
+            df['MI_VAL'] = pd.to_numeric(df[c_mi], errors='coerce').fillna(0) if c_mi else 0
+            df['ME_VAL'] = pd.to_numeric(df[c_me], errors='coerce').fillna(0) if c_me else 0
+            df['GATILHO'] = pd.to_numeric(df[c_gat], errors='coerce').fillna(0) if c_gat else 0
+            
+            lista_turnos.append(df[['DATA_REF', 'TURNO_ID', 'PERCURSO_LIMP', 'GATILHO', 'MI_VAL', 'ME_VAL']])
+        except Exception:
+            continue
+        
+    df_realizado = pd.concat(lista_turnos, ignore_index=True).dropna(subset=['DATA_REF'])
+
+    try:
+        df_tec = pd.read_csv(URL_NOVA_LASTRA)
+        df_tec.columns = [str(c).strip().upper() for c in df_tec.columns]
+        
+        df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['DATA_SEQUENCIADO'], errors='coerce')
+        df_tec['PERCURSO_CHAVE'] = df_tec['PERCURSO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        df_tec['TURNO_CHAVE'] = df_tec['TURNO_ALOCADO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        
+        for col in ['120X270', '160 X 160', 'PC', 'M2', 'PESO BRUTO']:
+            if col in df_tec.columns:
+                df_tec[col] = pd.to_numeric(df_tec[col], errors='coerce').fillna(0)
+            else:
+                df_tec[col] = 0
+        return df_realizado, df_tec
+    except Exception as e:
+        st.error(f"Erro ao mapear a nova aba de Lastras: {e}")
+        return df_realizado, pd.DataFrame()
