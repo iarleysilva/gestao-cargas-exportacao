@@ -11,26 +11,38 @@ st.markdown("---")
 df_demanda = carregar_dados_separacao()
 df_execucao = carregar_execucao_turnos()
 
-if df_demanda is not None and df_execucao is not None:
+# ─── TRAVA DE SEGURANÇA 1: VALIDA SE OS DADOS RETORNARAM VERDADEIROS DA NUVEM ───
+if df_demanda is None or df_execucao is None:
+    st.error("⚠️ Erro ao conectar ou extrair os dados diretamente do Google Sheets.")
+    st.info("💡 **Dica Técnica:** Verifique se as credenciais da planilha estão configuradas nos 'Secrets' do Streamlit Cloud.")
+else:
     
-    # Executa o cruzamento de Match por Percurso
+    # Garante que a coluna de junção esteja idêntica e sem espaços em branco nas pontas
+    df_demanda['PERCURSO'] = df_demanda['PERCURSO'].astype(str).str.strip()
+    df_execucao['PERCURSO'] = df_execucao['PERCURSO'].astype(str).str.strip()
+
+    # Executa o cruzamento de Match por Percurso com segurança
     df_consolidado = pd.merge(df_demanda, df_execucao, on='PERCURSO', how='left')
+    
     df_consolidado['DEU_MATCH'] = df_consolidado['TURNO_REALIZOU'].notna().map({True: 'SIM 🟢', False: 'NÃO 🔴'})
     df_consolidado['TURNO_REALIZOU'] = df_consolidado['TURNO_REALIZOU'].fillna('Aguardando')
 
     # SEPARAÇÃO COM VARIÁVEIS NORMALIZADAS EM MAIÚSCULO
+    df_consolidado['STATUS'] = df_consolidado['STATUS'].astype(str).str.upper().str.strip()
     df_sobras_geral = df_consolidado[df_consolidado['STATUS'] == "NÃO SEQUENCIADO"]
     df_seq_geral = df_consolidado[df_consolidado['STATUS'] == "SEQUENCIADO"]
     
     # Filtro lateral
     st.sidebar.header("🗓️ Filtro de Operação")
+    
+    # Evita quebras se a data vier vazia
     datas_planejadas = sorted(df_seq_geral['DT_SEQUENCIADO'].dropna().unique())
     
     if datas_planejadas:
         data_selecionada = st.sidebar.selectbox(
             "Selecione o Dia para Analisar a Demanda dos Turnos:",
             options=datas_planejadas,
-            format_func=lambda x: pd.to_datetime(x).strftime('%d/%m/%Y')
+            format_func=lambda x: pd.to_datetime(x).strftime('%d/%m/%Y') if pd.notna(x) else str(x)
         )
         df_seq_filtrado = df_seq_geral[df_seq_geral['DT_SEQUENCIADO'] == data_selecionada]
     else:
@@ -40,11 +52,13 @@ if df_demanda is not None and df_execucao is not None:
     # KPIs do Topo
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric(label="🔴 Carteira de Sobras Geral", value=f"{df_sobras_geral['VOLUME_TOTAL'].sum()} Acessos", delta=f"{len(df_sobras_geral)} percursos parados")
+        v_sobras = df_sobras_geral['VOLUME_TOTAL'].sum() if not df_sobras_geral.empty else 0
+        st.metric(label="🔴 Carteira de Sobras Geral", value=f"{v_sobras} Acessos", delta=f"{len(df_sobras_geral)} percursos parados")
     with c2:
-        st.metric(label="🟢 Programado para o Dia Selecionado", value=f"{df_seq_filtrado['VOLUME_TOTAL'].sum()} Acessos", delta=f"{len(df_seq_filtrado)} percursos enviados")
+        v_filtrado = df_seq_filtrado['VOLUME_TOTAL'].sum() if not df_seq_filtrado.empty else 0
+        st.metric(label="🟢 Programado para o Dia Selecionado", value=f"{v_filtrado} Acessos", delta=f"{len(df_seq_filtrado)} percursos enviados")
     with c3:
-        total_match = len(df_seq_filtrado[df_seq_filtrado['DEU_MATCH'] == 'SIM 🟢'])
+        total_match = len(df_seq_filtrado[df_seq_filtrado['DEU_MATCH'] == 'SIM 🟢']) if not df_seq_filtrado.empty else 0
         st.metric(label="📊 Percursos com MATCH no Dia", value=f"{total_match} Bipados", delta="Sincronizado")
 
     st.markdown("---")
@@ -54,8 +68,10 @@ if df_demanda is not None and df_execucao is not None:
     with tab_seq:
         if not df_seq_filtrado.empty:
             df_seq_view = df_seq_filtrado.copy()
-            df_seq_view['1º Firme'] = df_seq_view['DT_1_FIRME'].dt.strftime('%d/%m/%Y')
-            df_seq_view['Data Fís. Percurso'] = df_seq_view['DT_PERCURSO'].dt.strftime('%d/%m/%Y')
+            
+            # Tratamento robusto para formatação de datas (evita crash se já forem strings)
+            df_seq_view['1º Firme'] = pd.to_datetime(df_seq_view['DT_1_FIRME'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_seq_view['DT_1_FIRME'].astype(str))
+            df_seq_view['Data Fís. Percurso'] = pd.to_datetime(df_seq_view['DT_PERCURSO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_seq_view['DT_PERCURSO'].astype(str))
             
             cols_seq = ['PERCURSO', 'VOLUME_TOTAL', '1º Firme', 'Data Fís. Percurso', 'TURNO_ALOCADO', 'DEU_MATCH', 'TURNO_REALIZOU']
             st.dataframe(
@@ -75,11 +91,10 @@ if df_demanda is not None and df_execucao is not None:
         if not df_sobras_geral.empty:
             df_sobras_view = df_sobras_geral.copy()
             
-            # Formatação da timeline para as sobras
-            df_sobras_view['1º Firme'] = df_sobras_view['DT_1_FIRME'].dt.strftime('%d/%m/%Y')
-            df_sobras_view['Data Fís. Percurso'] = df_sobras_view['DT_PERCURSO'].dt.strftime('%d/%m/%Y')
+            # Tratamento robusto para formatação de datas nas sobras
+            df_sobras_view['1º Firme'] = pd.to_datetime(df_sobras_view['DT_1_FIRME'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_sobras_view['DT_1_FIRME'].astype(str))
+            df_sobras_view['Data Fís. Percurso'] = pd.to_datetime(df_sobras_view['DT_PERCURSO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_sobras_view['DT_PERCURSO'].astype(str))
             
-            # Exibindo a timeline completa nas sobras junto com o Status solicitado
             cols_sobras = ['PERCURSO', 'VOLUME_TOTAL', '1º Firme', 'Data Fís. Percurso', 'STATUS']
             st.dataframe(
                 df_sobras_view[cols_sobras].rename(columns={
@@ -91,5 +106,3 @@ if df_demanda is not None and df_execucao is not None:
             )
         else:
             st.info("Parabéns! Nenhuma sobra na carteira.")
-else:
-    st.error("Erro na estruturação dos dados.")
