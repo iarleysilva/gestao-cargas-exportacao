@@ -58,7 +58,7 @@ if df_ht is not None:
     capacidade_carga_hoje_ajustada = max(0, 350 - perda_capacidade_por_estrado)
 
     # ─── PANEL RESUMO DE IMPACTOS ───
-    with st.expander("🔬 Resumo de Impactos e Justificativas de Fábrica (PCP)", expanded=True):
+    with st.expander("🔬 Resumo de Impactos e Justificativas de Fábrica (PCO)", expanded=True):
         m1, m2 = st.columns(2)
         m1.metric("🪵 Estrados Processados Hoje", f"{estrados_tratados_hoje} un", f"{fornadas_full} Full / {fornadas_parciais} Parc", delta_color="off")
         m2.metric("📉 Perda de Capacidade (Carga)", f"-{perda_capacidade_por_estrado} PLT", f"Capacidade Ajustada do Dia: {capacidade_carga_hoje_ajustada} PLT", delta_color="inverse")
@@ -158,7 +158,7 @@ if df_ht is not None:
             if dt < data_corte_a2:
                 st.error("🛑 **Cargas Atrasadas Detectadas:** Estes paletes estão ocupando espaço físico precioso e travando as docas.")
             elif total_plt_planejado == 0:
-                st.success("✨ **Janela Totalmente Livre:** Excelente momento para o PCP antecipar percursos e diluir o pátio.")
+                st.success("✨ **Janela Totalmente Livre:** Excelente momento para o PCO antecipar percursos e diluir o pátio.")
             elif (capacidade_nominal_ht - total_plt_planejado) < 0:
                 st.warning(f"🚨 **Gargalo de Escoamento:** O volume alocado supera o limite físico disponível para a jornada atual.")
             else:
