@@ -8,16 +8,29 @@ st.title("📦 Módulo: Demanda & Fluxo de Separação")
 st.write("Visualização da Linha de Tempo das Cargas e Validação de Match com a Fábrica.")
 st.markdown("---")
 
-df_demanda = carregar_dados_separacao()
-df_execucao = carregar_execucao_turnos()
+# Carregamento bruto das funções
+retorno_demanda = carregar_dados_separacao()
+retorno_execucao = carregar_execucao_turnos()
 
-# ─── TRAVA CRÍTICA CONTRA QUEDA DE CONEXÃO DO GOOGLE SHEETS ───
+# ─── DESEMPACOTAMENTO DE TUPLAS (RESOLVE O TYPEERROR) ───
+# Se o retorno for uma tupla, pegamos apenas o DataFrame que está na primeira posição (índice 0)
+if isinstance(retorno_demanda, tuple):
+    df_demanda = retorno_demanda[0]
+else:
+    df_demanda = retorno_demanda
+
+if isinstance(retorno_execucao, tuple):
+    df_execucao = retorno_execucao[0]
+else:
+    df_execucao = retorno_execucao
+
+# ─── TRAVA CRÍTICA SE OS DADOS VIEREM NULOS OU VAZIOS ───
 if df_demanda is None or df_execucao is None:
     st.error("⚠️ Erro ao conectar ou extrair os dados diretamente do Google Sheets.")
-    st.info("💡 **Dica Técnica:** O servidor da Web não conseguiu autenticar na planilha. Verifique se as chaves de acesso estão configuradas nos 'Secrets' do Streamlit Cloud.")
-    st.stop()  # Trava o script aqui com elegância se o dado for nulo, impedindo o erro do Pandas
+    st.info("💡 **Análise Técnica:** O retorno do banco de dados está nulo. Verifique a estrutura da planilha ou as chaves de acesso.")
+    st.stop()
 
-# ─── SE PASSOU DA TRAVA, O PROCESSO CONTINUA SEGURO DE ONDE PAROU ───
+# ─── TRATAMENTO DAS COLUNAS COM GARANTIA DE DATAFRAME ───
 df_demanda['PERCURSO'] = df_demanda['PERCURSO'].astype(str).str.strip()
 df_execucao['PERCURSO'] = df_execucao['PERCURSO'].astype(str).str.strip()
 
@@ -66,7 +79,7 @@ with tab_seq:
     if not df_seq_filtrado.empty:
         df_seq_view = df_seq_filtrado.copy()
         
-        # Tratamento seguro para exibição de datas na tabela
+        # Tratamento robusto para formatação de datas
         df_seq_view['1º Firme'] = pd.to_datetime(df_seq_view['DT_1_FIRME'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_seq_view['DT_1_FIRME'].astype(str))
         df_seq_view['Data Fís. Percurso'] = pd.to_datetime(df_seq_view['DT_PERCURSO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_seq_view['DT_PERCURSO'].astype(str))
         
@@ -88,7 +101,7 @@ with tab_sobras:
     if not df_sobras_geral.empty:
         df_sobras_view = df_sobras_geral.copy()
         
-        # Tratamento seguro para exibição de datas na tabela de sobras
+        # Tratamento robusto para formatação de datas nas sobras
         df_sobras_view['1º Firme'] = pd.to_datetime(df_sobras_view['DT_1_FIRME'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_sobras_view['DT_1_FIRME'].astype(str))
         df_sobras_view['Data Fís. Percurso'] = pd.to_datetime(df_sobras_view['DT_PERCURSO'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_sobras_view['DT_PERCURSO'].astype(str))
         
