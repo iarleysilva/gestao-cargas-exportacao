@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime, time
 import zoneinfo
-from src.core.data_loader import carregar_e_tratar_dados, carregar_realizado_ht
+from src.core.data_loader import carregar_e_tratar_dados, carregar_realizado_ht, carregar_matriz_capacidade
 
 st.set_page_config(page_title="Capacidade HT", layout="wide")
 
@@ -20,6 +20,9 @@ hora_atual = agora_br.time()
 # ─── 2. CARREGAMENTO DAS BASES ───
 df_ht, txt_completo_a2 = carregar_e_tratar_dados()
 df_realizado_ht = carregar_realizado_ht(ano_selecionado=str(hoje_br.year))
+
+# 🔌 INTEGRAÇÃO DO NOVO MOTOR DE CAPACIDADE DO PCO
+_, tracking_pco = carregar_matriz_capacidade()
 
 if df_ht is not None:
     
@@ -54,14 +57,16 @@ if df_ht is not None:
                 elif qtd_estrados > 0:
                     fornadas_parciais += 1
 
-    perda_capacidade_por_estrado = (fornadas_full * 30) + (fornadas_parciais * 15)
-    capacidade_carga_hoje_ajustada = max(0, 350 - perda_capacidade_por_estrado)
+    # Captura a meta padrão de estrados parametrizada na planilha
+    meta_estrados_pco = tracking_pco.get(('HT', 'TOTAL', 'META', 'ESTRADOS_DIA'), 200)
 
     # ─── PANEL RESUMO DE IMPACTOS ───
     with st.expander("🔬 Resumo de Impactos e Justificativas de Fábrica (PCO)", expanded=True):
         m1, m2 = st.columns(2)
-        m1.metric("🪵 Estrados Processados Hoje", f"{estrados_tratados_hoje} un", f"{fornadas_full} Full / {fornadas_parciais} Parc", delta_color="off")
-        m2.metric("📉 Perda de Capacidade (Carga)", f"-{perda_capacidade_por_estrado} PLT", f"Capacidade Ajustada do Dia: {capacidade_carga_hoje_ajustada} PLT", delta_color="inverse")
+        m1.metric("🪵 Estrados Processados Hoje", f"{estrados_tratados_hoje} un", f"Meta Diária Planilha: {meta_estrados_pco} un", delta_color="off")
+        
+        perda_capacidade_por_estrado = (fornadas_full * 30) + (fornadas_parciais * 15)
+        m2.metric("📉 Perda de Capacidade (Carga)", f"-{perda_capacidade_por_estrado} PLT", delta_color="inverse")
 
     st.markdown("### 🗓️ Linha do Tempo de Carregamento")
 
@@ -74,7 +79,7 @@ if df_ht is not None:
         menor_data = min(datas_reais)
         inicio_timeline = min(menor_data, data_corte_a2)
         maior_data_real = max(datas_reais)
-        fim_timeline = maior_data_real + timedelta(days=1)  # 🔹 Corrigido aqui para o nome correto
+        fim_timeline = maior_data_real + timedelta(days=1)
         if fim_timeline.weekday() == 6:
             fim_timeline += timedelta(days=1)
             
@@ -84,7 +89,7 @@ if df_ht is not None:
     else:
         datas_para_renderizar = [data_corte_a2]
 
-    # ─── 4. RENDERIZAÇÃO ESTÉTICA DA TIMELINE ───
+    # ─── 4. RENDERIZAÇÃO ESTÉTICA DA TIMELINE DINÂMICA COMPLETA ───
     for dt in datas_para_renderizar:
         dt_date = dt.date()
         dia_semana = dt.weekday()
@@ -93,7 +98,26 @@ if df_ht is not None:
         total_plt_planejado = df_cargas_da_data['Total_Plt_Percurso'].sum() if not df_cargas_da_data.empty else 0
         dt_formatada = dt.strftime('%d/%m/%Y (%a)')
         
-        # Regra de Jornada das 22h
+        # 📊 1. CAPTURA DOS 3 TURNOS DO PCO (Mude esta parte dentro do seu loop)
+        c_t1 = tracking_pco.get(('HT', '1', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '1.0', 'CICLOS', 'POR_TURNO'), 4))
+        r_t1 = tracking_pco.get(('HT', '1', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '1.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 27))
+        
+        c_t2 = tracking_pco.get(('HT', '2', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '2.0', 'CICLOS', 'POR_TURNO'), 4))
+        r_t2 = tracking_pco.get(('HT', '2', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '2.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
+        
+        # Adicione o Turno 3 na captura:
+        c_t3 = tracking_pco.get(('HT', '3', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '3.0', 'CICLOS', 'POR_TURNO'), 4))
+        r_t3 = tracking_pco.get(('HT', '3', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '3.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
+        
+        # 📊 2. CORREÇÃO DA FÓRMULA DO TETO (Incluindo o T3 na soma)
+        teto_dia_completo = (c_t1 * r_t1) + (c_t2 * r_t2) + (c_t3 * r_t3)
+        
+        if dt_date == hoje_br:
+            capacidade_base_dia = max(0, teto_dia_completo - perda_capacidade_por_estrado)
+        else:
+            capacidade_base_dia = teto_dia_completo
+
+        # Regra de Jornada e Paradas de Fim de Semana
         is_parada_fim_de_semana = False
         if dt_date == hoje_br:
             if dia_semana == 5 and hora_atual >= time(22, 0):
@@ -101,14 +125,16 @@ if df_ht is not None:
             elif dia_semana == 6 and hora_atual < time(22, 0):
                 is_parada_fim_de_semana = True
                 
-            capacidade_nominal_ht = 0 if is_parada_fim_de_semana else capacidade_carga_hoje_ajustada
+            capacidade_nominal_ht = 0 if is_parada_fim_de_semana else capacidade_base_dia
+            
+            # Descontos parciais baseados na capacidade dinâmica informada pelo PCO
             if not is_parada_fim_de_semana:
                 if hora_atual >= time(13, 30):
-                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - 115)
+                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - (ciclos_t1 * rend_t1))
                 if hora_atual >= time(22, 0):
-                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - 115)
+                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - (ciclos_t2 * rend_t2))
         else:
-            capacidade_nominal_ht = 0 if dia_semana == 6 else 350
+            capacidade_nominal_ht = 0 if dia_semana == 6 else capacidade_base_dia
 
         # Semáforos e Identificação de Títulos dos Cards
         if dt < data_corte_a2:
@@ -139,22 +165,20 @@ if df_ht is not None:
             c1, c2, c3 = st.columns(3)
             
             with c1:
-                st.metric("🎯 Teto Disponível", f"{capacidade_nominal_ht} PLT", f"~{round(capacidade_nominal_ht/27, 1)} Ciclos")
+                st.metric("🎯 Teto Disponível (Estimativa PCO)", f"{capacidade_nominal_ht} PLT", f"Turnos parametrizados ativos")
             with c2:
-                st.metric("📦 Carga Planejada", f"{total_plt_planejado} PLT", f"{round(total_plt_planejado / 27, 1)} Estufas")
+                st.metric("📦 Carga Planejada", f"{total_plt_planejado} PLT", f"{round(total_plt_planejado / 27, 1)} Estufas" if total_plt_planejado > 0 else "0 Estufas")
             with c3:
                 saldo_atual_card = capacidade_nominal_ht - total_plt_planejado
                 st.metric("⚖️ Saldo Real de Pátio", f"{saldo_atual_card} PLT", 
                           delta=saldo_atual_card if saldo_atual_card >= 0 else saldo_atual_card,
                           delta_color="normal" if saldo_atual_card >= 0 else "inverse")
             
-            # Barra de Progresso Estética de Ocupação
             if capacidade_nominal_ht > 0:
                 porcentagem_ocupacao = min(1.0, float(total_plt_planejado / capacidade_nominal_ht))
                 st.markdown(f"**Ocupação Física do HT:** {int(porcentagem_ocupacao * 100)}%")
                 st.progress(porcentagem_ocupacao)
             
-            # Alertas Visuais Coloridos em formato Clean
             if dt < data_corte_a2:
                 st.error("🛑 **Cargas Atrasadas Detectadas:** Estes paletes estão ocupando espaço físico precioso e travando as docas.")
             elif total_plt_planejado == 0:

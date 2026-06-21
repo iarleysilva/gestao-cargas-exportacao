@@ -1,7 +1,9 @@
 import streamlit as st
 import os
 import pandas as pd
-from src.core.data_loader import carregar_e_tratar_dados
+from datetime import datetime, time
+import zoneinfo
+from src.core.data_loader import carregar_e_tratar_dados, carregar_realizado_ht, carregar_matriz_capacidade
 
 # 1. Configuração da página (Layout Wide para melhor aproveitamento de tabelas)
 st.set_page_config(
@@ -10,8 +12,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. Carrega os dados direto da API do Google Sheets (aba 'base demandas atual' e 'atualização')
+# Relógio Operacional Oficial de Brasília
+fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+agora_br = datetime.now(fuso_br)
+hoje_br = agora_br.date()
+hora_atual = agora_br.time()
+
+# 2. Carrega as bases unificadas de dados e as metas dinâmicas do PCO
 df, ultima_atualizacao = carregar_e_tratar_dados()
+df_realizado_ht = carregar_realizado_ht(ano_selecionado=str(hoje_br.year))
+_, tracking_pco = carregar_matriz_capacidade()
 
 # 3. Barra Lateral (Sidebar) com o Card de Última Atualização real do Sheets
 st.sidebar.title("🚢 Navegação & Status")
@@ -29,7 +39,7 @@ if df is not None:
     df['Total_Plt_Percurso'] = pd.to_numeric(df['Total_Plt_Percurso'], errors='coerce').fillna(0).astype(int)
     
     # ─────────────────────────────────────────────────────────────────
-    # CRIAÇÃO DAS ABAS - INVERTIDAS: INDICADORES AGORA É A PRIMEIRA (PADRÃO)
+    # CRIAÇÃO DAS ABAS
     # ─────────────────────────────────────────────────────────────────
     tab_indicadores, tab_consulta = st.tabs(["📈 Indicadores Gerais", "🔍 Consulta por Fatura/Percurso"])
     
@@ -37,7 +47,7 @@ if df is not None:
     colunas_exibicao = ['Status', 'Fatura', 'Percurso', 'Total_Plt_Percurso', 'Data_Carregamento', 'Modal']
     
     # ─────────────────────────────────────────────────────────────────
-    # ABA 1: INDICADORES GERAIS (Visão de Capacidade) - AGORA É A HOME
+    # ABA 1: INDICADORES GERAIS (A Demanda governa o Cálculo de Capacidade)
     # ─────────────────────────────────────────────────────────────────
     with tab_indicadores:
         st.markdown("### 📈 Painel de Capacidade e Volumetria")
@@ -45,21 +55,21 @@ if df is not None:
         st.markdown("---")
         
         # Definição automática das datas de Hoje e Amanhã
-        hoje = pd.Timestamp.now().normalize()
+        hoje = pd.Timestamp(hoje_br)
         amanha = hoje + pd.Timedelta(days=1)
         
         # Filtra a base base de cálculos removendo sempre o que for zero
         df_validos = df[df['Total_Plt_Percurso'] > 0]
         
-        # Cálculo 1: Volume focado em Hoje (PRIORIDADE 1)
-        df_hoje = df_validos[df_validos['Data_Carregamento'].dt.date == hoje.date()]
+        # Cálculo 1: Volume focado em Hoje
+        df_hoje = df_validos[df_validos['Data_Carregamento'].dt.date == hoje_br]
         total_plts_hoje = int(df_hoje['Total_Plt_Percurso'].sum())
         
-        # Cálculo 2: Volume focado em Amanhã (PRIORIDADE 2)
+        # Cálculo 2: Volume focado em Amanhã
         df_amanha = df_validos[df_validos['Data_Carregamento'].dt.date == amanha.date()]
         total_plts_amanha = int(df_amanha['Total_Plt_Percurso'].sum())
 
-        # Cálculo 3: Total Geral (Independente de data)
+        # Cálculo 3: Total Geral
         total_plts_geral = int(df_validos['Total_Plt_Percurso'].sum())
         cargas_geral = len(df_validos)
         
@@ -78,7 +88,6 @@ if df is not None:
         </div>
         """
         
-        # Renderização dos Cards (HOJE EM PRIMEIRO LUGAR NA COLUNA 1)
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown(estilo_card_topo.format(cor="#dc3545", titulo="🚨 Programado para Hoje", valor=f"{total_plts_hoje} Plts", subtitulo=f"{len(df_hoje)} cargas para {hoje.strftime('%d/%m')}"), unsafe_allow_html=True)
@@ -87,25 +96,153 @@ if df is not None:
         with c3:
             st.markdown(estilo_card_topo.format(cor="#6c757d", titulo="📊 Total Geral em Aberto", valor=f"{total_plts_geral} Plts", subtitulo=f"{cargas_geral} cargas programadas no total"), unsafe_allow_html=True)
         
-        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # ─── ⚖️ VALIDAÇÃO DE TURNOS E TRAVA DE LIMBO ───
+        st.markdown("### ⏱️ Governança de Pátio e Validação de Turnos (Hoje)")
+        
+        # Captura os parâmetros vivos da planilha mestre (Com tratamento de string/float para chaves)
+        ciclos_t1 = tracking_pco.get(('HT', '1', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '1.0', 'CICLOS', 'POR_TURNO'), 4))
+        rend_t1 = tracking_pco.get(('HT', '1', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '1.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 27))
+        estimativa_t1 = ciclos_t1 * rend_t1 
+
+        ciclos_t2 = tracking_pco.get(('HT', '2', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '2.0', 'CICLOS', 'POR_TURNO'), 4))
+        rend_t2 = tracking_pco.get(('HT', '2', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '2.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
+        estimativa_t2 = ciclos_t2 * rend_t2 
+
+        # 🔌 INCLUSÃO CIRÚRGICA DO TURNO 3
+        ciclos_t3 = tracking_pco.get(('HT', '3', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '3.0', 'CICLOS', 'POR_TURNO'), 4))
+        rend_t3 = tracking_pco.get(('HT', '3', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '3.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
+        estimativa_t3 = ciclos_t3 * rend_t3
+        
+        df_real_hoje = df_realizado_ht[df_realizado_ht['DATA_PROD'].dt.date == hoje_br] if df_realizado_ht is not None else pd.DataFrame()
+        t1_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('I$|1', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
+        t2_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('II$|2', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
+        t3_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('III$|3', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
+        
+        # Regras de tempo baseadas no plantão oficial informado
+        if hora_atual < time(13, 30):
+            status_t1_txt = "⚙️ Em Andamento / Previsto"
+            cor_t1 = "#007ebd"
+            carga_real_t1 = os.environ.get('ESTIMATIVA_T1', estimativa_t1)
+        elif hora_atual >= time(13, 30) and t1_confirmado == 0:
+            status_t1_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+            cor_t1 = "#d97706"
+            carga_real_t1 = estimativa_t1 
+        else:
+            status_t1_txt = "✅ Concluído e Consolidado no Sheets"
+            cor_t1 = "#25a244"
+            carga_real_t1 = t1_confirmado 
+
+        if hora_atual < time(22, 0):
+            status_t2_txt = "⚙️ Em Andamento / Previsto"
+            cor_t2 = "#007ebd"
+            carga_real_t2 = estimativa_t2
+        elif hora_atual >= time(22, 0) and t2_confirmado == 0:
+            status_t2_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+            cor_t2 = "#d97706"
+            carga_real_t2 = estimativa_t2
+        else:
+            status_t2_txt = "✅ Concluído e Consolidado no Sheets"
+            cor_t2 = "#25a244"
+            carga_real_t2 = t2_confirmado
+
+        # Validação temporal do Turno 3 (Plantão 22:00 às 05:00)
+        if hora_atual >= time(22, 0) or hora_atual < time(5, 0):
+            status_t3_txt = "⚙️ Noturno Em Andamento"
+            cor_t3 = "#007ebd"
+            carga_real_t3 = estimativa_t3
+        elif hora_atual >= time(5, 0) and t3_confirmado == 0:
+            status_t3_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+            cor_t3 = "#d97706"
+            carga_real_t3 = estimativa_t3
+        else:
+            status_t3_txt = "✅ Concluído e Consolidado no Sheets"
+            cor_t3 = "#25a244"
+            carga_real_t3 = t3_confirmado
+
+        # Transforma os blocos visuais de 2 colunas para 3 colunas para acolher o Turno 3
+        ct1, ct2, ct3 = st.columns(3)
+        with ct1:
+            st.markdown(f"""
+            <div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t1}; height: 140px;">
+                <span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 1 (05h00 - 13h30)</span>
+                <h4 style="margin: 5px 0; color: {cor_t1};">{status_t1_txt}</h4>
+                <p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t1} PLT (Plan: {estimativa_t1} / Real: {t1_confirmado})</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with ct2:
+            st.markdown(f"""
+            <div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t2}; height: 140px;">
+                <span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 2 (13h30 - 22h00)</span>
+                <h4 style="margin: 5px 0; color: {cor_t2};">{status_t2_txt}</h4>
+                <p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t2} PLT (Plan: {estimativa_t2} / Real: {t2_confirmado})</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with ct3:
+            st.markdown(f"""
+            <div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t3}; height: 140px;">
+                <span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 3 (22h00 - 05h00)</span>
+                <h4 style="margin: 5px 0; color: {cor_t3};">{status_t3_txt}</h4>
+                <p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t3} PLT (Plan: {estimativa_t3} / Real: {t3_confirmado})</p>
+            </div>
+            """, unsafe_allow_html=True)
+
         st.markdown("---")
         
-        # Seção de seleção livre por calendário
-        st.markdown("#### 🔍 Consultar Outra Data Específica")
+        # ─── 🔍 SEÇÃO: CONSULTA POR CALENDÁRIO DIZENDO A CAPACIDADE ───
+        st.markdown("#### 🔍 Consultar Horizonte de Carga e Estufagem Necessária")
         
         data_minima = df['Data_Carregamento'].min().date()
         data_maxima = df['Data_Carregamento'].max().date()
         
         data_selecionada = st.date_input(
-            "Selecione uma data no calendário para detalhar os modais abaixo:",
+            "Selecione uma data no calendário para calcular a pressão logística nas estufas:",
             value=hoje.date() if data_minima <= hoje.date() <= data_maxima else data_minima,
             min_value=data_minima,
             max_value=data_maxima
         )
         
         df_dia = df_validos[df_validos['Data_Carregamento'].dt.date == data_selecionada]
-        st.markdown(f"##### Resumo detalhado para o dia: **{data_selecionada.strftime('%d/%m/%Y')}**")
+        st.markdown(f"##### Resumo Analítico de Estufagem para o dia: **{data_selecionada.strftime('%d/%m/%Y')}**")
         
+        # Volume Total do Dia Selecionado (Ex: Dia 22)
+        total_plts_dia_selecionado = int(df_dia['Total_Plt_Percurso'].sum()) if not df_dia.empty else 0
+        
+        # 🧮 O MOTOR REVERSO ATUALIZADO: SOMA OS 3 TURNOS NO CALENDÁRIO
+        rendimento_medio_estufa = (rend_t1 + rend_t2 + rend_t3) / 3
+        
+        if total_plts_dia_selecionado > 0:
+            ciclos_necessarios = -(-total_plts_dia_selecionado // rendimento_medio_estufa)
+        else:
+            ciclos_necessarios = 0
+            
+        teto_maximo_dia = (ciclos_t1 + ciclos_t2 + ciclos_t3) # Agora soma os 3 turnos vivos da planilha!
+        saldo_ciclos_patio = teto_maximo_dia - ciclos_necessarios
+        
+        if saldo_ciclos_patio < 0:
+            cor_alerta_pco = "rgba(239, 68, 68, 0.1)"
+            borda_alerta_pco = "#ef4444"
+            texto_alerta_pco = f"🚨 **Gargalo Detectado:** A demanda programada exige {int(ciclos_necessarios)} ciclos de aquecimento, mas os 3 turnos do plantão disponibilizam apenas {int(teto_maximo_dia)} ciclos hoje. Estouro de {int(abs(saldo_ciclos_patio))} fornadas!"
+        elif total_plts_dia_selecionado == 0:
+            cor_alerta_pco = "rgba(37, 162, 68, 0.1)"
+            borda_alerta_pco = "#25a244"
+            texto_alerta_pco = "✨ **Janela Totalmente Livre:** Zero paletes programados. Ótimo momento para antecipações operacionais."
+        else:
+            cor_alerta_pco = "rgba(245, 158, 11, 0.1)"
+            borda_alerta_pco = "#f59e0b"
+            texto_alerta_pco = f"🔋 **Operação Equilibrada:** A demanda exige {int(ciclos_necessarios)} estufas. O plantão de 3 turnos ainda suporta a entrada de mais {int(saldo_ciclos_patio)} ciclos de tratamento."
+
+        st.markdown(f"""
+        <div style="background-color: {cor_alerta_pco}; border-left: 6px solid {borda_alerta_pco}; padding: 18px; border-radius: 6px; margin-bottom: 20px;">
+            <h4 style="margin: 0 0 5px 0; color: #1e293b;">Diagnóstico de Capacidade do HT</h4>
+            <p style="margin: 0; font-size: 15px; color: #334155;">{texto_alerta_pco}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Divisão por modais técnicos
         df_rodo_dia = df_dia[df_dia['Modal'].str.contains('Rodoviário', case=False, na=False)]
         df_mari_dia = df_dia[df_dia['Modal'].str.contains('Marítimo', case=False, na=False)]
         
@@ -153,7 +290,7 @@ if df is not None:
                     st.info("Nenhuma carga marítima ativa para esta data.")
 
     # ─────────────────────────────────────────────────────────────────
-    # ABA 2: CONSULTA POR FATURA / PERCURSO (ANTIGA ABA 1)
+    # ABA 2: CONSULTA POR FATURA / PERCURSO
     # ─────────────────────────────────────────────────────────────────
     with tab_consulta:
         st.subheader("Filtros de Pesquisa")

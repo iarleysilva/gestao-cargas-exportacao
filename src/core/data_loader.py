@@ -60,12 +60,10 @@ def carregar_dados_separacao():
 
     try:
         df = pd.read_csv(url)
-        # Remove espaços extras dos nomes originais das colunas antes de converter
         df.columns = [str(c).strip() for c in df.columns]
         
         df_real = pd.DataFrame()
         
-        # 1. PERCURSO (Chave Principal)
         if 'PERCURSO' in df.columns:
             df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
         elif 'Percurso' in df.columns:
@@ -73,10 +71,8 @@ def carregar_dados_separacao():
         else:
             df_real['PERCURSO'] = df.iloc[:, 1].astype(str).str.strip().str.replace('.0', '', regex=False)
 
-        # 2. STATUS
         df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper() if 'STATUS' in df.columns else "SEQUENCIADO"
         
-        # 3. DATAS
         df_real['DT_1_FIRME'] = pd.to_datetime(df['DATA 1º FIRME'], errors='coerce') if 'DATA 1º FIRME' in df.columns else pd.to_datetime(pd.Timestamp.now().date())
         df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], errors='coerce') if 'DT PERCURSO' in df.columns else df_real['DT_1_FIRME']
         
@@ -85,12 +81,10 @@ def carregar_dados_separacao():
         else:
             df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], errors='coerce') if 'PROGRAMADO' in df.columns else df_real['DT_1_FIRME']
         
-        # 4. VOLUMES
         cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0) if 'CXS' in df.columns else 0
         pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0) if 'PLS' in df.columns else 0
         df_real['VOLUME_TOTAL'] = (cxs + pls).astype(int)
         
-        # 5. MAPEAMENTO DO TURNO (Tratando a nova coluna TURNO_REAL)
         colunas_turno_possiveis = ['TURNO_REAL', 'TURNO REAL', 'TURNO_REALIZOU', 'TURNO']
         col_turno_encontrada = next((c for c in colunas_turno_possiveis if c in df.columns), None)
         
@@ -100,7 +94,6 @@ def carregar_dados_separacao():
         else:
             df_real['TURNO_ALOCADO'] = "1.0"
         
-        # Filtra linhas vazias
         df_real = df_real.dropna(subset=['PERCURSO'])
         df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
         
@@ -260,3 +253,54 @@ def carregar_dados_lastras_novas():
     except Exception as e:
         st.error(f"Erro ao mapear a nova aba de Sequenciamento v1: {e}")
         return df_realizado, pd.DataFrame()
+
+
+def carregar_matriz_capacidade():
+    """
+    [MÓDULO: PARAMETRIZAÇÃO DINÂMICA]
+    Carrega a matriz mestre de restrições diretamente da aba 'atualização' (Gid 1318835351).
+    Retorna o DataFrame bruto e um dicionário mapeado para consultas rápidas.
+    """
+    ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
+    url_matriz = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1318835351"
+    
+    try:
+        df = pd.read_csv(url_matriz)
+        if df.empty:
+            return None, {}
+        
+        # Normalização de strings e remoção de espaços fantasmas
+        df.columns = df.columns.str.strip()
+        for col in ['ATIVIDADE', 'METRICA_NOME', 'SUB_DIVISAO']:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+        
+        # Processamento lógico: Prioriza OVERRIDE_VALOR, senão assume VALOR_PADRAO 
+        def definir_valor_atual(row):
+            override = str(row['OVERRIDE_VALOR']).strip()
+            if override and override != 'nan' and override != '':
+                try:
+                    return float(override) if '.' in override or override == '0.75' else int(float(override))
+                except:
+                    return override
+            
+            val_padrao = row['VALOR_PADRAO']
+            try:
+                # Trata inteiros e floats (como taxas percentuais) de forma correta
+                return float(val_padrao) if int(val_padrao) != float(val_padrao) else int(val_padrao)
+            except:
+                return val_padrao
+
+        df['VALOR_REAL'] = df.apply(definir_valor_atual, axis=1)
+        
+        # Converte o DataFrame em um mapa indexado por tupla para consultas instantâneas nas páginas
+        # Chave: (ATIVIDADE, TURNO, METRICA_NOME, SUB_DIVISAO) -> Valor: VALOR_REAL
+        mapa_metricas = {}
+        for _, row in df.iterrows():
+            chave = (str(row['ATIVIDADE']), str(row['TURNO']), str(row['METRICA_NOME']), str(row['SUB_DIVISAO']))
+            mapa_metricas[chave] = row['VALOR_REAL']
+            
+        return df, mapa_metricas
+    except Exception as e:
+        st.error(f"Erro ao carregar a matriz mestre de capacidades: {e}")
+        return None, {}
