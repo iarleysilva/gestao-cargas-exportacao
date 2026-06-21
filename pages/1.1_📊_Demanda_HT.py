@@ -120,46 +120,75 @@ if df is not None:
         t2_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('II$|2', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
         t3_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('III$|3', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
         
-        # Regras de tempo baseadas no plantão oficial informado
-        if hora_atual < time(13, 30):
-            status_t1_txt = "⚙️ Em Andamento / Previsto"
-            cor_t1 = "#007ebd"
-            carga_real_t1 = os.environ.get('ESTIMATIVA_T1', estimativa_t1)
-        elif hora_atual >= time(13, 30) and t1_confirmado == 0:
-            status_t1_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
-            cor_t1 = "#d97706"
-            carga_real_t1 = estimativa_t1 
-        else:
-            status_t1_txt = "✅ Concluído e Consolidado no Sheets"
-            cor_t1 = "#25a244"
-            carga_real_t1 = t1_confirmado 
+        # Identifica o dia da semana atual (0=Segunda, 5=Sábado, 6=Domingo)
+        dia_semana_hoje = hoje_br.weekday()
 
-        if hora_atual < time(22, 0):
-            status_t2_txt = "⚙️ Em Andamento / Previsto"
-            cor_t2 = "#007ebd"
-            carga_real_t2 = estimativa_t2
-        elif hora_atual >= time(22, 0) and t2_confirmado == 0:
-            status_t2_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
-            cor_t2 = "#d97706"
-            carga_real_t2 = estimativa_t2
+        # 🛑 REGRAS DE STATUS DOS TURNOS TRATANDO O DOMINGO E O PLANTÃO OFICIAL
+        if dia_semana_hoje == 6:
+            # Se for Domingo: Turno 1 e Turno 2 estão fechados de verdade
+            status_t1_txt = "🛑 Fábrica Fechada (Plantão inicia às 22h)"
+            cor_t1 = "#64748b" # Cinza tático de inatividade
+            carga_real_t1 = 0
+            
+            status_t2_txt = "🛑 Fábrica Fechada (Plantão inicia às 22h)"
+            cor_t2 = "#64748b"
+            carga_real_t2 = 0
         else:
-            status_t2_txt = "✅ Concluído e Consolidado no Sheets"
-            cor_t2 = "#25a244"
-            carga_real_t2 = t2_confirmado
+            # Dias de Semana Normais para Turno 1 e Turno 2
+            if hora_atual < time(13, 30):
+                status_t1_txt = "⚙️ Em Andamento / Previsto"
+                cor_t1 = "#007ebd"
+                carga_real_t1 = os.environ.get('ESTIMATIVA_T1', estimativa_t1)
+            elif hora_atual >= time(13, 30) and t1_confirmado == 0:
+                status_t1_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+                cor_t1 = "#d97706"
+                carga_real_t1 = estimativa_t1 
+            else:
+                status_t1_txt = "✅ Concluído e Consolidado no Sheets"
+                cor_t1 = "#25a244"
+                carga_real_t1 = t1_confirmado 
 
-        # Validação temporal do Turno 3 (Plantão 22:00 às 05:00)
-        if hora_atual >= time(22, 0) or hora_atual < time(5, 0):
-            status_t3_txt = "⚙️ Noturno Em Andamento"
-            cor_t3 = "#007ebd"
-            carga_real_t3 = estimativa_t3
-        elif hora_atual >= time(5, 0) and t3_confirmado == 0:
-            status_t3_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
-            cor_t3 = "#d97706"
-            carga_real_t3 = estimativa_t3
+            if hora_atual < time(22, 0):
+                status_t2_txt = "⚙️ Em Andamento / Previsto"
+                cor_t2 = "#007ebd"
+                carga_real_t2 = estimativa_t2
+            elif hora_atual >= time(22, 0) and t2_confirmado == 0:
+                status_t2_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+                cor_t2 = "#d97706"
+                carga_real_t2 = estimativa_t2
+            else:
+                status_t2_txt = "✅ Concluído e Consolidado no Sheets"
+                cor_t2 = "#25a244"
+                carga_real_t2 = t2_confirmado
+
+        # ─── REGRA DO TURNO 3 (Roda de Domingo a Sexta à noite - Jornada de Segunda) ───
+        if dia_semana_hoje == 5 and hora_atual >= time(22, 0):
+            # Sábado após as 22h: Plantão encerrado
+            status_t3_txt = "🛑 Fim de Plantão (Retorno Domingo 22h)"
+            cor_t3 = "#64748b"
+            carga_real_t3 = 0
+        elif dia_semana_hoje == 6 and hora_atual < time(22, 0):
+            # Domingo antes das 22h: Fábrica paralisada aguardando o início
+            status_t3_txt = "⏳ Aguardando Início do Plantão Noturno"
+            cor_t3 = "#64748b"
+            carga_real_t3 = 0
         else:
-            status_t3_txt = "✅ Concluído e Consolidado no Sheets"
-            cor_t3 = "#25a244"
-            carga_real_t3 = t3_confirmado
+            # Turno 3 em Execução Real (Entre 22:00 e 05:00)
+            if hora_atual >= time(22, 0) or hora_atual < time(5, 0):
+                if dia_semana_hoje == 6:
+                    status_t3_txt = "⚙️ Noturno Em Andamento ➔ (Jornada de Segunda)"
+                else:
+                    status_t3_txt = "⚙️ Noturno Em Andamento"
+                cor_t3 = "#007ebd"
+                carga_real_t3 = estimativa_t3
+            elif hora_atual >= time(5, 0) and t3_confirmado == 0:
+                status_t3_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+                cor_t3 = "#d97706"
+                carga_real_t3 = estimativa_t3
+            else:
+                status_t3_txt = "✅ Concluído e Consolidado no Sheets"
+                cor_t3 = "#25a244"
+                carga_real_t3 = t3_confirmado
 
         # Transforma os blocos visuais de 2 colunas para 3 colunas para acolher o Turno 3
         ct1, ct2, ct3 = st.columns(3)
