@@ -45,7 +45,7 @@ def carregar_e_tratar_dados():
 
 def carregar_dados_separacao():
     """
-    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - BLINDADO V5.1]
+    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - ME - BLINDADO V5.1]
     Regra estrita ditada pelo PCO: O Python se guia única e exclusivamente pela 
     coluna 'STATUS' para validar 'NÃO SEQUENCIADO' e calcula o volume real via CXS + PLS.
     """
@@ -66,25 +66,113 @@ def carregar_dados_separacao():
 
     try:
         df = pd.read_csv(url)
-        
-        # Remove apenas espaços extras das pontas mantendo a grafia original das palavras
         df.columns = [str(c).strip() for c in df.columns]
-        
         df_real = pd.DataFrame()
         
-        # 🛡️ 1. Mapeamento Direto do Percurso (Sem adivinhação)
         if 'PERCURSO' in df.columns:
             df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
         else:
             st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha.")
             return None, data_corte_separacao, dt_a3_str
 
-        # 🛡️ 2. Guia Exclusivo pela coluna STATUS
         if 'STATUS' in df.columns:
             df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
         else:
             st.error("🚨 ERRO CRÍTICO: O Python exige a coluna 'STATUS' para validar a demanda.")
             return None, data_corte_separacao, dt_a3_str
+        
+        if 'Data 1º Firme' in df.columns:
+            df_real['DT_1_FIRME'] = pd.to_datetime(df['Data 1º Firme'], dayfirst=True, errors='coerce')
+        else:
+            df_real['DT_1_FIRME'] = pd.to_datetime(df.iloc[:, 2], dayfirst=True, errors='coerce')
+            
+        if 'DT PERCURSO' in df.columns:
+            df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], dayfirst=True, errors='coerce')
+        else:
+            df_real['DT_PERCURSO'] = df_real['DT_1_FIRME']
+        
+        if 'DATA SEQUENCIADO' in df.columns:
+            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
+        elif 'PROGRAMADO' in df.columns:
+            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], dayfirst=True, errors='coerce')
+        else:
+            df_real['DT_SEQUENCIADO'] = df_real['DT_1_FIRME']
+        
+        cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0) if 'CXS' in df.columns else 0
+        pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0) if 'PLS' in df.columns else 0
+        df_real['VOLUME_TOTAL'] = (cxs + pls).astype(int)
+        
+        if 'TURNO_REAL' in df.columns:
+            col_turno_alocado = 'TURNO_REAL'
+        elif 'TURNO' in df.columns:
+            col_turno_alocado = 'TURNO'
+        else:
+            col_turno_alocado = None
+            
+        if col_turno_alocado:
+            df_real['TURNO_ALOCADO'] = pd.to_numeric(df[col_turno_alocado], errors='coerce').fillna(1.0).astype(str).str.strip()
+            df_real['TURNO_ALOCADO'] = df_real['TURNO_ALOCADO'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
+        else:
+            df_real['TURNO_ALOCADO'] = "1.0"
+        
+        df_real = df_real.dropna(subset=['PERCURSO'])
+        df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
+
+        df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
+        df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
+        df_real = df_real.drop_duplicates(subset=['PERCURSO'], keep='first').drop(columns=['prioridade_status'])
+        
+        return df_real, data_corte_separacao, dt_a3_str
+    except Exception as e:
+        st.error(f"Erro no mapeamento unificado focado na coluna STATUS (ME): {e}")
+        return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
+
+
+def carregar_dados_separacao_mi():
+    """
+    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - MI - NOVO V5.2]
+    Conecta e higieniza os dados do Mercado Interno na aba 'Sequenciamento_MI' (Gid 1330445331).
+    Guarda os dados brutos reais de CXS e PLS para exibição aberta e calculada de volumetria.
+    """
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
+    
+    ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
+    url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"
+    
+    try:
+        df_att = pd.read_csv(url_atualizacao, header=None)
+        dt_a3_str = str(df_att.iloc[2, 0]).strip() if len(df_att) > 2 else "Não informada"
+        data_corte_separacao = pd.to_datetime(dt_a3_str.split()[0], dayfirst=True, errors='coerce')
+        if pd.isna(data_corte_separacao):
+            data_corte_separacao = pd.to_datetime(pd.Timestamp.now().date())
+    except Exception:
+        data_corte_separacao = pd.to_datetime(pd.Timestamp.now().date())
+        dt_a3_str = "Usando data do sistema"
+
+    try:
+        df = pd.read_csv(url)
+        df.columns = [str(c).strip() for c in df.columns]
+        df_real = pd.DataFrame()
+        
+        # 1. Mapeamento Direto do Percurso
+        if 'PERCURSO' in df.columns:
+            df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
+        else:
+            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha de MI.")
+            return None, data_corte_separacao, dt_a3_str
+
+        # 2. Guia Único pela coluna STATUS
+        if 'STATUS' in df.columns:
+            df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
+        else:
+            st.error("🚨 ERRO CRÍTICO: Coluna 'STATUS' exigida não encontrada no MI.")
+            return None, data_corte_separacao, dt_a3_str
+        
+        # 3. Mapeamento do Canal Comercial do MI
+        if 'CANAL' in df.columns:
+            df_real['CANAL'] = df['CANAL'].astype(str).str.strip()
+        else:
+            df_real['CANAL'] = "Não Informado"
         
         # Mapeamento Rígido de Datas
         if 'Data 1º Firme' in df.columns:
@@ -104,10 +192,10 @@ def carregar_dados_separacao():
         else:
             df_real['DT_SEQUENCIADO'] = df_real['DT_1_FIRME']
         
-        # 🛡️ 3. SOMA FORÇADA DA VOLUMETRIA (Ignora a coluna ACESSOS nativa que vem errada)
-        cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0) if 'CXS' in df.columns else 0
-        pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0) if 'PLS' in df.columns else 0
-        df_real['VOLUME_TOTAL'] = (cxs + pls).astype(int)
+        # 🛡️ COALESCÊNCIA DE PRECISÃO: Extrai os dados puros originais da base sólida
+        df_real['CXS'] = pd.to_numeric(df['CXS'], errors='coerce').fillna(0).astype(int)
+        df_real['PLS'] = pd.to_numeric(df['PLS'], errors='coerce').fillna(0).astype(int)
+        df_real['VOLUME_TOTAL'] = df_real['CXS'] + df_real['PLS']
         
         # Mapeamento do Turno com prioridade para TURNO_REAL
         if 'TURNO_REAL' in df.columns:
@@ -126,7 +214,7 @@ def carregar_dados_separacao():
         df_real = df_real.dropna(subset=['PERCURSO'])
         df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
 
-        # 🛡️ 4. ENGINE DE BLINDAGEM OPERACIONAL (DUPLO CHECK)
+        # 5. ENGINE DE BLINDAGEM OPERACIONAL (DUPLO CHECK MI)
         df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
         df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
         
@@ -134,7 +222,7 @@ def carregar_dados_separacao():
         
         return df_real, data_corte_separacao, dt_a3_str
     except Exception as e:
-        st.error(f"Erro no mapeamento unificado focado na coluna STATUS: {e}")
+        st.error(f"Erro no mapeamento unificado focado na coluna STATUS (MI): {e}")
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
