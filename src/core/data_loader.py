@@ -4,7 +4,8 @@ import streamlit as st
 def carregar_e_tratar_dados():
     """
     [MÓDULO: DEMANDA HT]
-    Conecta à planilha original de demandas HT e lê a célula A2 para atualização.
+    Conecta à planilha original de demandas HT e lê de forma híbrida (Nome + Posição)
+    para evitar o conflito de colunas com o mesmo nome (como K e P).
     """
     ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_base = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1836411567"
@@ -19,16 +20,21 @@ def carregar_e_tratar_dados():
     try:
         df = pd.read_csv(url_base)
         if df.empty: return None, data_atualizacao
+        
+        # Remove espaços das pontas dos cabeçalhos
         df.columns = df.columns.str.strip()
         df_real = pd.DataFrame()
         
+        # 🛡️ RESTAURAÇÃO COMPATIBILIDADE HT: Mapeamento seguro para colunas duplicadas
         df_real['Tipo'] = df['Tipo'] if 'Tipo' in df.columns else "Carga"
-        df_real['Status'] = df['Status Perc'] if 'Status Perc' in df.columns else df.iloc[:, 1]
-        df_real['Fatura'] = df['Fatura'] if 'Fatura' in df.columns else df.iloc[:, 8]
-        df_real['Percurso'] = df['Percurso'] if 'Percurso' in df.columns else df.iloc[:, 9]
-        df_real['Total_Plt_Percurso'] = df['Total_Plt_Percurso'] if 'Total_Plt_Percurso' in df.columns else df.iloc[:, 15]
-        df_real['Data_Carregamento'] = df['Data_Carregamento'] if 'Data_Carregamento' in df.columns else df.iloc[:, 16]
-        df_real['Modal'] = df['Modal'] if 'Modal' in df.columns else df.iloc[:, 17]
+        df_real['Status'] = df.iloc[:, 1]  # Força a segunda coluna física (Coluna B)
+        df_real['Fatura'] = df.iloc[:, 8]  # Força a 9ª coluna física (Coluna I)
+        df_real['Percurso'] = df.iloc[:, 9] # Força a 10ª coluna física (Coluna J)
+        
+        # 🎯 Alvo corrigido: Puxa exatamente a coluna P (16ª coluna, índice 15) evitando o espelhamento da K
+        df_real['Total_Plt_Percurso'] = df.iloc[:, 15] 
+        df_real['Data_Carregamento'] = df.iloc[:, 16]  # Coluna Q (índice 16)
+        df_real['Modal'] = df.iloc[:, 17]             # Coluna R (índice 17)
         
         df_real = df_real.dropna(subset=['Fatura', 'Percurso'], how='all')
         df_real['Data_Carregamento'] = pd.to_datetime(df_real['Data_Carregamento'], errors='coerce')
@@ -39,9 +45,9 @@ def carregar_e_tratar_dados():
 
 def carregar_dados_separacao():
     """
-    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE]
-    Carrega os dados mapeando estritamente a nova aba oficial 'Sequenciamento_Exportação_v1' 
-    identificando a coluna TURNO_REAL de forma prioritária.
+    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - BLINDADO V5.1]
+    Regra estrita ditada pelo PCO: O Python se guia única e exclusivamente pela 
+    coluna 'STATUS' para validar 'NÃO SEQUENCIADO' e calcula o volume real via CXS + PLS.
     """
     url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=2016672411&single=true&output=csv"
     
@@ -60,46 +66,75 @@ def carregar_dados_separacao():
 
     try:
         df = pd.read_csv(url)
+        
+        # Remove apenas espaços extras das pontas mantendo a grafia original das palavras
         df.columns = [str(c).strip() for c in df.columns]
         
         df_real = pd.DataFrame()
         
+        # 🛡️ 1. Mapeamento Direto do Percurso (Sem adivinhação)
         if 'PERCURSO' in df.columns:
             df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
-        elif 'Percurso' in df.columns:
-            df_real['PERCURSO'] = df['Percurso'].astype(str).str.strip().str.replace('.0', '', regex=False)
         else:
-            df_real['PERCURSO'] = df.iloc[:, 1].astype(str).str.strip().str.replace('.0', '', regex=False)
+            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha.")
+            return None, data_corte_separacao, dt_a3_str
 
-        df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper() if 'STATUS' in df.columns else "SEQUENCIADO"
+        # 🛡️ 2. Guia Exclusivo pela coluna STATUS
+        if 'STATUS' in df.columns:
+            df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
+        else:
+            st.error("🚨 ERRO CRÍTICO: O Python exige a coluna 'STATUS' para validar a demanda.")
+            return None, data_corte_separacao, dt_a3_str
         
-        df_real['DT_1_FIRME'] = pd.to_datetime(df['DATA 1º FIRME'], errors='coerce') if 'DATA 1º FIRME' in df.columns else pd.to_datetime(pd.Timestamp.now().date())
-        df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], errors='coerce') if 'DT PERCURSO' in df.columns else df_real['DT_1_FIRME']
+        # Mapeamento Rígido de Datas
+        if 'Data 1º Firme' in df.columns:
+            df_real['DT_1_FIRME'] = pd.to_datetime(df['Data 1º Firme'], dayfirst=True, errors='coerce')
+        else:
+            df_real['DT_1_FIRME'] = pd.to_datetime(df.iloc[:, 2], dayfirst=True, errors='coerce')
+            
+        if 'DT PERCURSO' in df.columns:
+            df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], dayfirst=True, errors='coerce')
+        else:
+            df_real['DT_PERCURSO'] = df_real['DT_1_FIRME']
         
         if 'DATA SEQUENCIADO' in df.columns:
             df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
+        elif 'PROGRAMADO' in df.columns:
+            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], dayfirst=True, errors='coerce')
         else:
-            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], errors='coerce') if 'PROGRAMADO' in df.columns else df_real['DT_1_FIRME']
+            df_real['DT_SEQUENCIADO'] = df_real['DT_1_FIRME']
         
+        # 🛡️ 3. SOMA FORÇADA DA VOLUMETRIA (Ignora a coluna ACESSOS nativa que vem errada)
         cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0) if 'CXS' in df.columns else 0
         pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0) if 'PLS' in df.columns else 0
         df_real['VOLUME_TOTAL'] = (cxs + pls).astype(int)
         
-        colunas_turno_possiveis = ['TURNO_REAL', 'TURNO REAL', 'TURNO_REALIZOU', 'TURNO']
-        col_turno_encontrada = next((c for c in colunas_turno_possiveis if c in df.columns), None)
-        
-        if col_turno_encontrada:
-            df_real['TURNO_ALOCADO'] = pd.to_numeric(df[col_turno_encontrada], errors='coerce').fillna(1.0).astype(str).str.strip()
+        # Mapeamento do Turno com prioridade para TURNO_REAL
+        if 'TURNO_REAL' in df.columns:
+            col_turno_alocado = 'TURNO_REAL'
+        elif 'TURNO' in df.columns:
+            col_turno_alocado = 'TURNO'
+        else:
+            col_turno_alocado = None
+            
+        if col_turno_alocado:
+            df_real['TURNO_ALOCADO'] = pd.to_numeric(df[col_turno_alocado], errors='coerce').fillna(1.0).astype(str).str.strip()
             df_real['TURNO_ALOCADO'] = df_real['TURNO_ALOCADO'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
         else:
             df_real['TURNO_ALOCADO'] = "1.0"
         
         df_real = df_real.dropna(subset=['PERCURSO'])
         df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
+
+        # 🛡️ 4. ENGINE DE BLINDAGEM OPERACIONAL (DUPLO CHECK)
+        df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
+        df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
+        
+        df_real = df_real.drop_duplicates(subset=['PERCURSO'], keep='first').drop(columns=['prioridade_status'])
         
         return df_real, data_corte_separacao, dt_a3_str
     except Exception as e:
-        st.error(f"Erro no mapeamento unificado da aba com TURNO_REAL: {e}")
+        st.error(f"Erro no mapeamento unificado focado na coluna STATUS: {e}")
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
@@ -229,17 +264,26 @@ def carregar_dados_lastras_novas():
 
     try:
         df_tec = pd.read_csv(URL_NOVA_LASTRA)
-        df_tec.columns = [str(c).strip().upper() for c in df_tec.columns]
+        df_tec.columns = [str(c).strip() for c in df_tec.columns]
         
         if 'DATA SEQUENCIADO' in df_tec.columns:
             df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
-        else:
+        elif 'PROGRAMADO' in df_tec.columns:
             df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['PROGRAMADO'], errors='coerce')
+        else:
+            df_tec['DATA_SEQ'] = pd.NaT
             
         df_tec['PERCURSO_CHAVE'] = df_tec['PERCURSO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         
-        if 'TURNO' in df_tec.columns:
-            df_tec['TURNO_CHAVE'] = pd.to_numeric(df_tec['TURNO'], errors='coerce').fillna(1.0).astype(str).str.strip()
+        if 'TURNO_REAL' in df_tec.columns:
+            col_turno_t = 'TURNO_REAL'
+        elif 'TURNO' in df_tec.columns:
+            col_turno_t = 'TURNO'
+        else:
+            col_turno_t = None
+            
+        if col_turno_t:
+            df_tec['TURNO_CHAVE'] = pd.to_numeric(df_tec[col_turno_t], errors='coerce').fillna(1.0).astype(str).str.strip()
             df_tec['TURNO_CHAVE'] = df_tec['TURNO_CHAVE'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
         else:
             df_tec['TURNO_CHAVE'] = "1.0"
@@ -269,13 +313,11 @@ def carregar_matriz_capacidade():
         if df.empty:
             return None, {}
         
-        # Normalização de strings e remoção de espaços fantasmas
         df.columns = df.columns.str.strip()
         for col in ['ATIVIDADE', 'METRICA_NOME', 'SUB_DIVISAO']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
         
-        # Processamento lógico: Prioriza OVERRIDE_VALOR, senão assume VALOR_PADRAO 
         def definir_valor_atual(row):
             override = str(row['OVERRIDE_VALOR']).strip()
             if override and override != 'nan' and override != '':
@@ -286,15 +328,12 @@ def carregar_matriz_capacidade():
             
             val_padrao = row['VALOR_PADRAO']
             try:
-                # Trata inteiros e floats (como taxas percentuais) de forma correta
                 return float(val_padrao) if int(val_padrao) != float(val_padrao) else int(val_padrao)
             except:
                 return val_padrao
 
         df['VALOR_REAL'] = df.apply(definir_valor_atual, axis=1)
         
-        # Converte o DataFrame em um mapa indexado por tupla para consultas instantâneas nas páginas
-        # Chave: (ATIVIDADE, TURNO, METRICA_NOME, SUB_DIVISAO) -> Valor: VALOR_REAL
         mapa_metricas = {}
         for _, row in df.iterrows():
             chave = (str(row['ATIVIDADE']), str(row['TURNO']), str(row['METRICA_NOME']), str(row['SUB_DIVISAO']))
