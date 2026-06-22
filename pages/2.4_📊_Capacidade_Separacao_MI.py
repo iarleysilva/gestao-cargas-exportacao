@@ -3,10 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta, time
 import zoneinfo
 
-# Trava de Segurança Geral
-if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("⚠️ Por favor, faça o login na página inicial antes de acessar este módulo.")
-    st.stop()
+
 
 # ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
 import sys
