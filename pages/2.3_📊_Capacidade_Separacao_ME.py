@@ -2,6 +2,15 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta, datetime, time
 import zoneinfo
+
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
+import sys
+from pathlib import Path
+raiz = Path(__file__).resolve().parents[2]
+if str(raiz) not in sys.path:
+    sys.path.append(str(raiz))
+# ──────────────────────────────────────────────
+
 from src.core.data_loader import carregar_dados_separacao, carregar_execucao_turnos
 
 st.set_page_config(page_title="Capacidade ME", layout="wide")

@@ -1,13 +1,27 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time
+from datetime import timedelta, datetime, time
 import zoneinfo
+
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
+import sys
+from pathlib import Path
+raiz = Path(__file__).resolve().parents[2]
+if str(raiz) not in sys.path:
+    sys.path.append(str(raiz))
+# ──────────────────────────────────────────────
+
 from src.core.data_loader import carregar_dados_separacao, carregar_execucao_turnos
 
-st.set_page_config(page_title="Demanda Separação ME", layout="wide")
+st.set_page_config(page_title="Capacidade ME", layout="wide")
+
+# 📢 AVISO DE GOVERNANÇA DE DADOS PARA DESENVOLVEDORES FUTUROS:
+# ⚠️ ATENÇÃO: Os status textuais em caixa alta ('SEQUENCIADO' e 'NÃO SEQUENCIADO') 
+# alimentam diretamente o motor de Capacidade ME. Qualquer alteração nessas strings 
+# ou na caixa das letras interromperá a sincronização entre os módulos.
 
 st.title("📦 Módulo: Demanda & Fluxo de Separação — ME")
-st.write("SLA Logístico Avançado: Validação de Permanência Física por Janela de Turno.")
+st.write("SLA Logístico Advanced: Validação de Permanência Física por Janela de Turno.")
 st.markdown("---")
 
 # ─── 1. CARREGAMENTO DOS DADOS ORIGINAIS DA NOVA ABA V1 ───
@@ -67,7 +81,6 @@ def calcular_SLA_permanencia(row):
 
     # Cenário D: CARGAS DE HOJE (JULGAMENTO DO TEMPO DO EVENTO)
     if turno_planejado in ["1", "1.0"]:
-        # Janela T1: 05:00 às 13:30
         if hora_atual < time(5, 0):
             return 'AGUARDANDO INÍCIO SEP ⏳', 'Aguardando Início do Turno 1'
         elif time(5, 0) <= hora_atual < time(13, 30):
@@ -80,7 +93,6 @@ def calcular_SLA_permanencia(row):
             return 'NÃO ADERIDO ❌', 'Turno 1 Encerrado sem Aderência 🛑'
 
     elif turno_planejado in ["2", "2.0"]:
-        # Janela T2: 13:30 às 22:00
         if hora_atual < time(13, 30):
             return 'AGUARDANDO INÍCIO SEP ⏳', 'Aguardando Início do Turno 2'
         elif time(13, 30) <= hora_atual < time(22, 0):
@@ -93,7 +105,6 @@ def calcular_SLA_permanencia(row):
             return 'NÃO ADERIDO ❌', 'Turno 2 Encerrado sem Aderência 🛑'
 
     elif turno_planejado in ["3", "3.0"]:
-        # Janela T3: 22:00 às 05:00 do dia seguinte
         if hora_atual < time(22, 0) and hora_atual >= time(5, 0):
             return 'AGUARDANDO INÍCIO SEP ⏳', 'Aguardando Início do Turno 3'
         else:
@@ -108,9 +119,9 @@ res_SLA = df_demanda.apply(calcular_SLA_permanencia, axis=1)
 df_demanda['DEU_MATCH'] = [x[0] for x in res_SLA]
 df_demanda['TURNO_REALIZOU_VIEW'] = [x[1] for x in res_SLA]
 
-# Segrega as visões de tabelas
-df_sobras_geral = df_demanda[df_demanda['STATUS'].astype(str).str.upper().str.strip() == "NÃO SEQUENCIADO"]
-df_seq_geral = df_demanda[df_demanda['STATUS'].astype(str).str.upper().str.strip() == "SEQUENCIADO"]
+# Segrega as visões de tabelas com os novos status estritos do loader
+df_sobras_geral = df_demanda[df_demanda['STATUS'] == "NÃO SEQUENCIADO"]
+df_seq_geral = df_demanda[df_demanda['STATUS'] == "SEQUENCIADO"]
 
 # ─── 5. FILTROS E INTERFACE GRÁFICA DO STREAMLIT ───
 st.sidebar.header("🗓️ Filtro de Operação")
@@ -133,7 +144,7 @@ else:
 c1, c2, c3 = st.columns(3)
 with c1:
     v_sobras = df_sobras_geral['VOLUME_TOTAL'].sum() if not df_sobras_geral.empty else 0
-    st.metric("🔴 Sobras Geral", f"{v_sobras} Acessos")
+    st.metric("🔴 Sobras Geral (Total Carteira)", f"{v_sobras} Acessos")
 with c2:
     v_filtrado = df_seq_filtrado['VOLUME_TOTAL'].sum() if not df_seq_filtrado.empty else 0
     st.metric("🟢 Programado no Dia", f"{v_filtrado} Acessos")
@@ -144,6 +155,7 @@ with c3:
 st.markdown("---")
 tab_seq, tab_sobras = st.tabs(["✅ Demandas Sequenciadas ME", "⚠️ Carteira Geral de Sobras (Não Sequenciadas)"])
 
+# ─── ABA 1: DEMANDAS SEQUENCIADAS ───
 with tab_seq:
     if not df_seq_filtrado.empty:
         df_seq_view = df_seq_filtrado.copy()
@@ -162,12 +174,56 @@ with tab_seq:
     else:
         st.info("Nenhum percurso sequenciado encontrado para este dia.")
 
+# ─── ABA 2: CARTEIRA GERAL DE SOBRAS (RESTRUTURADA PREMIUM COM SOMA EXATA E QTD PERCURSOS) ───
 with tab_sobras:
     if not df_sobras_geral.empty:
-        df_sobras_view = df_sobras_geral.copy()
-        df_sobras_view['Status SLA'] = df_sobras_view['DEU_MATCH']
-        cols_sobras = ['PERCURSO', 'VOLUME_TOTAL', 'Status SLA', 'TURNO_REALIZOU_VIEW']
+        df_sobras_processamento = df_sobras_geral.copy()
+        df_sobras_processamento['DT_PERCURSO_NORMALIZADA'] = pd.to_datetime(df_sobras_processamento['DT_PERCURSO'], errors='coerce')
+        
+        st.markdown("### 🗓️ Oportunidades Pendentes por Data do Percurso")
+        
+        # 📊 AGRUPAMENTO OPERACIONAL DA REGRA DE OURO (Soma Acessos Puro + Contagem de Percursos únicos)
+        resumo_datas_sobras = df_sobras_processamento.groupby('DT_PERCURSO_NORMALIZADA').agg(
+            TOTAL_ACESSOS=('VOLUME_TOTAL', 'sum'),
+            QTD_PERCURSOS=('PERCURSO', 'count')
+        ).reset_index().sort_values('DT_PERCURSO_NORMALIZADA')
+        
+        # Criação dos cards horizontais estilizados
+        colunas_cards = st.columns(min(len(resumo_datas_sobras), 4))
+        for index, row_card in resumo_datas_sobras.reset_index().iterrows():
+            idx_col = index % 4
+            if index > 0 and idx_col == 0:
+                colunas_cards = st.columns(min(len(resumo_datas_sobras) - index, 4))
+                
+            dt_card_formatada = row_card['DT_PERCURSO_NORMALIZADA'].strftime('%d/%m/%Y')
+            volume_card_acessos = int(row_card['TOTAL_ACESSOS'])
+            qtd_percursos = int(row_card['QTD_PERCURSOS'])
+            
+            with colunas_cards[idx_col]:
+                st.markdown(f"""
+                <div style="background-color: #f8fafc; border-left: 5px solid #ef4444; border-radius: 8px; padding: 15px; margin-bottom: 15px; border-right: 1px solid #e2e8f0; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0;">
+                    <div style="font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">📅 {dt_card_formatada}</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #1e293b; line-height: 1.1; margin: 8px 0;">{volume_card_acessos} <span style="font-size: 0.9rem; font-weight: 400; color: #64748b;">Acessos</span></div>
+                    <div style="font-size: 0.85rem; font-weight: 600; color: #b91c1c;">📦 {qtd_percursos} Percurso(s) Pendente(s)</div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### 📋 Detalhamento Técnico da Planilha (Não Sequenciados)")
+        
+        df_sobras_processamento['Data_Programacao'] = pd.to_datetime(df_sobras_processamento['DT_1_FIRME'], errors='coerce').dt.strftime('%d/%m/%Y').fillna(df_sobras_processamento['DT_1_FIRME'].astype(str))
+        df_sobras_processamento['Data_Percurso'] = df_sobras_processamento['DT_PERCURSO_NORMALIZADA'].dt.strftime('%d/%m/%Y').fillna(df_sobras_processamento['DT_PERCURSO'].astype(str))
+        df_sobras_processamento['Data_Sequenciamento'] = "-"
+        
+        cols_sobras_tecnica = ['PERCURSO', 'VOLUME_TOTAL', 'STATUS', 'Data_Programacao', 'Data_Percurso', 'Data_Sequenciamento']
+        
         st.dataframe(
-            df_sobras_view[cols_sobras].rename(columns={'VOLUME_TOTAL': 'Acessos', 'TURNO_REALIZOU_VIEW': 'Histórico / Situação'}), 
-            use_container_width=True, hide_index=True
+            df_sobras_processamento[cols_sobras_tecnica].rename(columns={
+                'VOLUME_TOTAL': 'Acessos',
+                'STATUS': 'Status Planilha'
+            }), 
+            use_container_width=True, 
+            hide_index=True
         )
+    else:
+        st.success("✨ Excelente! Nenhuma sobra ou percurso não sequenciado pendente na carteira.")

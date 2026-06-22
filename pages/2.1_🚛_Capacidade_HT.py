@@ -1,7 +1,17 @@
 import streamlit as st
 import pandas as pd
-from datetime import timedelta, datetime, time
+from datetime import timedelta, datetime, time  # <--- CORRIGIDO: Inclusão do 'time' nativo
 import zoneinfo
+
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO (AJUSTADO PARA ARQUIVO SOLTO EM PAGES) ───
+import sys
+from pathlib import Path
+raiz = Path(__file__).resolve().parents[1]  # Sobe 1 nível (pages/ -> raiz do projeto)
+if str(raiz) not in sys.path:
+    sys.path.append(str(raiz))
+# ───────────────────────────────────────────────────────────────────────────────────
+
+# CORRIGIDO: Removido a importação fantasma de 'carregar_faturamento_ht'
 from src.core.data_loader import carregar_e_tratar_dados, carregar_realizado_ht, carregar_matriz_capacidade
 
 st.set_page_config(page_title="Capacidade HT", layout="wide")
@@ -98,18 +108,17 @@ if df_ht is not None:
         total_plt_planejado = df_cargas_da_data['Total_Plt_Percurso'].sum() if not df_cargas_da_data.empty else 0
         dt_formatada = dt.strftime('%d/%m/%Y (%a)')
         
-        # 📊 1. CAPTURA DOS 3 TURNOS DO PCO (Mude esta parte dentro do seu loop)
+        # 📊 1. CAPTURA DOS 3 TURNOS DO PCO
         c_t1 = tracking_pco.get(('HT', '1', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '1.0', 'CICLOS', 'POR_TURNO'), 4))
         r_t1 = tracking_pco.get(('HT', '1', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '1.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 27))
         
         c_t2 = tracking_pco.get(('HT', '2', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '2.0', 'CICLOS', 'POR_TURNO'), 4))
         r_t2 = tracking_pco.get(('HT', '2', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '2.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
         
-        # Adicione o Turno 3 na captura:
         c_t3 = tracking_pco.get(('HT', '3', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '3.0', 'CICLOS', 'POR_TURNO'), 4))
         r_t3 = tracking_pco.get(('HT', '3', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '3.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
         
-        # 📊 2. CORREÇÃO DA FÓRMULA DO TETO (Incluindo o T3 na soma)
+        # 📊 2. CAPTURA DO TETO COMPLETO DO DIA (Soma de T1 + T2 + T3)
         teto_dia_completo = (c_t1 * r_t1) + (c_t2 * r_t2) + (c_t3 * r_t3)
         
         if dt_date == hoje_br:
@@ -130,9 +139,9 @@ if df_ht is not None:
             # Descontos parciais baseados na capacidade dinâmica informada pelo PCO
             if not is_parada_fim_de_semana:
                 if hora_atual >= time(13, 30):
-                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - (ciclos_t1 * rend_t1))
+                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - (c_t1 * r_t1))
                 if hora_atual >= time(22, 0):
-                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - (ciclos_t2 * rend_t2))
+                    capacidade_nominal_ht = max(0, capacidade_nominal_ht - (c_t2 * r_t2))
         else:
             capacidade_nominal_ht = 0 if dia_semana == 6 else capacidade_base_dia
 

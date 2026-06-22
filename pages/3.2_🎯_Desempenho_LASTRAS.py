@@ -1,9 +1,19 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from src.core.data_loader import carregar_dados_lastras_antigo
+from datetime import timedelta, datetime, time
+import zoneinfo
 
-st.set_page_config(page_title="Desempenho Geral", layout="wide")
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
+import sys
+from pathlib import Path
+raiz = Path(__file__).resolve().parents[2]
+if str(raiz) not in sys.path:
+    sys.path.append(str(raiz))
+# ──────────────────────────────────────────────
+
+from src.core.data_loader import carregar_dados_lastras, carregar_dados_lastras_antigo
+
+st.set_page_config(page_title="Desempenho Lastras", layout="wide")
 
 st.title("🎯 Dashboard de Desempenho Operacional Geral")
 st.write("Análise consolidada de produtividade e bipes gerados por cada turno.")

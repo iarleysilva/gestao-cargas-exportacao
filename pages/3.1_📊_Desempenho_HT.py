@@ -1,7 +1,16 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from src.core.data_loader import carregar_realizado_ht
+
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
+import sys
+from pathlib import Path
+raiz = Path(__file__).resolve().parents[2] # Sobe os níveis exatos até a raiz do projeto
+if str(raiz) not in sys.path:
+    sys.path.append(str(raiz))
+# ──────────────────────────────────────────────
+
+from src.core.data_loader import carregar_realizado_ht, carregar_faturamento_ht
 
 st.set_page_config(page_title="Desempenho HT", layout="wide")
 

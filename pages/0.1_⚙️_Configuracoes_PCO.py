@@ -1,8 +1,19 @@
 import streamlit as st
 import pandas as pd
-from src.core.data_loader import carregar_matriz_capacidade
+from datetime import datetime
 
-st.set_page_config(page_title="Painel de Controle PCO", layout="wide")
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
+import sys
+from pathlib import Path
+raiz = Path(__file__).resolve().parents[2] # Sobe os níveis exatos até a raiz do projeto para o Python achar o 'src'
+if str(raiz) not in sys.path:
+    sys.path.append(str(raiz))
+# ──────────────────────────────────────────────
+
+# Aqui você importa as funções de carga ou atualização que essa página usa
+from src.core.data_loader import carregar_matriz_capacidade # (ou as funções específicas que ela usa)
+
+st.set_page_config(page_title="Configurações PCO", layout="wide")
 
 st.title("⚙️ Painel de Controle & Parametrização Dinâmica")
 st.write("Configuração restrita de capacidades operacionais e limites de mix.")

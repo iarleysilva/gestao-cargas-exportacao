@@ -1,3 +1,23 @@
+# === BANCO DE DADOS E RELATÓRIOS (DADOS REAIS DA EMPRESA) ===
+*.csv
+*.xlsx
+*.html
+*.pdf
+base_turno3_calibrada.csv
+base_turno2_calibrada.csv
+base_turno3_sem_duplicidades.csv
+dados_separacao_calibrados_junho.csv
+Diagnostico_PCO_Turno2_MI_Puro.pdf
+Matriz_Capacidade_Diagnostico_PCO.pdf
+
+# === ARQUIVOS TEMPORÁRIOS E AMBIENTE LOCAL ===
+.virtualenv/
+venv/
 .venv/
 __pycache__/
-.streamlit/config.toml
+*.pyc
+.streamlit/
+
+# === CONFIGURAÇÕES DA IDE ===
+.vscode/
+.idea/
