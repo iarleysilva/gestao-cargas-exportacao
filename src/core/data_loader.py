@@ -154,27 +154,23 @@ def carregar_dados_separacao_mi():
         df.columns = [str(c).strip() for c in df.columns]
         df_real = pd.DataFrame()
         
-        # 1. Mapeamento Direto do Percurso
         if 'PERCURSO' in df.columns:
             df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
         else:
             st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha de MI.")
             return None, data_corte_separacao, dt_a3_str
 
-        # 2. Guia Único pela coluna STATUS
         if 'STATUS' in df.columns:
             df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
         else:
             st.error("🚨 ERRO CRÍTICO: Coluna 'STATUS' exigida não encontrada no MI.")
             return None, data_corte_separacao, dt_a3_str
         
-        # 3. Mapeamento do Canal Comercial do MI
         if 'CANAL' in df.columns:
             df_real['CANAL'] = df['CANAL'].astype(str).str.strip()
         else:
             df_real['CANAL'] = "Não Informado"
         
-        # Mapeamento Rígido de Datas
         if 'Data 1º Firme' in df.columns:
             df_real['DT_1_FIRME'] = pd.to_datetime(df['Data 1º Firme'], dayfirst=True, errors='coerce')
         else:
@@ -192,12 +188,10 @@ def carregar_dados_separacao_mi():
         else:
             df_real['DT_SEQUENCIADO'] = df_real['DT_1_FIRME']
         
-        # 🛡️ COALESCÊNCIA DE PRECISÃO: Extrai os dados puros originais da base sólida
         df_real['CXS'] = pd.to_numeric(df['CXS'], errors='coerce').fillna(0).astype(int)
         df_real['PLS'] = pd.to_numeric(df['PLS'], errors='coerce').fillna(0).astype(int)
         df_real['VOLUME_TOTAL'] = df_real['CXS'] + df_real['PLS']
         
-        # Mapeamento do Turno com prioridade para TURNO_REAL
         if 'TURNO_REAL' in df.columns:
             col_turno_alocado = 'TURNO_REAL'
         elif 'TURNO' in df.columns:
@@ -214,7 +208,6 @@ def carregar_dados_separacao_mi():
         df_real = df_real.dropna(subset=['PERCURSO'])
         df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
 
-        # 5. ENGINE DE BLINDAGEM OPERACIONAL (DUPLO CHECK MI)
         df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
         df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
         
@@ -311,11 +304,40 @@ def carregar_realizado_ht(ano_selecionado="2026"):
         return None
 
 
+def carregar_faturamento_ht(ano_selecionado="2026"):
+    """
+    [MÓDULO: FATURAMENTO HT — COMPATIBILIDADE ISOLADA]
+    Conecta de forma dedicada à mesma base técnica do HT para suprir a demanda da tela 3.1.
+    """
+    ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
+    GIDS_ANOS = {"2026": "1740948393", "2027": "1740948393"}
+    
+    gid = GIDS_ANOS.get(ano_selecionado, "1740948393")
+    url = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid={gid}"
+    
+    try:
+        df = pd.read_csv(url, dtype=str)
+        if df.empty: return None
+        
+        df.columns = df.columns.str.strip()
+        df_fat = pd.DataFrame()
+        
+        # Mapeamento espelho compatível para a tela de desempenho HT rodar limpa
+        if 'CONCAT' in df.columns:
+            df_fat['CONCAT'] = df['CONCAT'].fillna('').astype(str).str.strip()
+        if 'Pallets' in df.columns:
+            df_fat['PALLETS'] = pd.to_numeric(df['Pallets'], errors='coerce').fillna(0).astype(int)
+            
+        return df
+    except Exception:
+        return None
+
+
 def carregar_dados_lastras_novas():
     """
     [MÓDULO: LASTRAS & SEPARAÇÃO ME V1]
     Busca os dados diretamente da nova aba unificada 'Sequenciamento_Exportação_v1'
-    vinculada diretamente ao seu link CSV de alta performance.
+    vincula diretamente ao seu link CSV de alta performance.
     """
     url_bipes = {
         "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
