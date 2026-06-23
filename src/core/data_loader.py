@@ -145,7 +145,8 @@ def carregar_dados_separacao_mi():
     [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - MI - NOVO V6.0]
     Conecta à aba unificada 'Sequenciamento_MI' e filtra fora as linhas que pertencem ao ME (Direct Sale).
     """
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
+    # 🔒 LINK ATUALIZADO COM O SEU NOVO GID DO GOOGLE SHEETS!
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
     
     ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"

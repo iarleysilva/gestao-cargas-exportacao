@@ -52,7 +52,7 @@ agora_br = datetime.now(fuso_br)
 hoje_br = agora_br.date()
 hora_atual = agora_br.time()
 
-# ─── 4. MOTOR DO VEREDITO DO SLA OPERACIONAL COM CADEADO DO TURNO 3 ───
+# ─── 4. MOTOR DO VEREDITO DO SLA OPERACIONAL COM CALIBRAGEM DO TURNO 3 ───
 def classificar_fluxo_mi(row):
     status_seq = str(row['STATUS']).upper().strip()
     percurso_id = row['PERCURSO']
@@ -66,39 +66,48 @@ def classificar_fluxo_mi(row):
     dt_seq = row['DT_SEQUENCIADO'].date()
     turno = str(row['TURNO_ALOCADO']).strip().replace('.0', '')
     
+    # 🧠 TRATAMENTO OPERACIONAL EXCLUSIVO DO TURNO 3 (VIAJANTE DO TEMPO)
+    if turno in ["3", "3.0"]:
+        # Cenário 1: Carga de Amanhã (Sequenciada hoje para iniciar às 22h)
+        if dt_seq > hoje_br:
+            if hora_atual >= time(22, 0):
+                return "Em Andamento"
+            return "Aguardando"
+            
+        # Cenário 2: Carga de Hoje (Iniciou ontem às 22h e morre hoje às 05h15)
+        elif dt_seq == hoje_br:
+            if hora_atual < time(5, 15):
+                return "Em Andamento"
+            else:
+                return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
+                
+        # Cenário 3: Histórico retroativo de dias passados
+        else:
+            return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
+
+    # ─── TRATAMENTO CONVENCIONAL (TURNOS 1 E 2) ───
     if dt_seq > hoje_br:
-        return "Sequenciado (Vai Separar)"
+        return "Aguardando"
         
     if dt_seq < hoje_br:
-        return "ADERIDO ✅" if bipado else "SOBRA"
+        return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
 
-    # ⏱️ REGRAS DE ATIVAÇÃO DE SLA POR JANELA HORÁRIA (HOJE)
-    # Turno 1 (05h00 - 13h30). Gatilho definitivo ativa às 13h45.
+    # Regras para as cargas do dia de hoje (Turno 1 e Turno 2)
     if turno in ["1", "1.0"]:
         if hora_atual < time(5, 0):
-            return "Sequenciado"
+            return "Aguardando"
         elif time(5, 0) <= hora_atual < time(13, 45):
             return "Em Andamento"
         else:
             return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
             
-    # Turno 2 (13h30 - 22h00). Gatilho definitivo ativa às 22h15.
     elif turno in ["2", "2.0"]:
         if hora_atual < time(13, 30):
-            return "Sequenciado"
+            return "Aguardando"
         elif time(13, 30) <= hora_atual < time(22, 15):
             return "Em Andamento"
         else:
             return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
-            
-    # Turno 3 (22h00 - 05h00). Cadeado operacional ajustado para acurácia de pátio.
-    elif turno in ["3", "3.0"]:
-        if time(22, 0) <= hora_atual or hora_atual < time(5, 15):
-            return "Em Andamento"
-        else:
-            # 🔒 VEREDITO DEFINITIVO: Passou das 05h15 da manhã, o turno está encerrado. 
-            # O dado não volta para a sobra, vira resultado de performance real do dia.
-            return "ADERIDO ✅" if bipado else "TURNO FECHADO"
 
     return "Em Andamento"
 
@@ -130,10 +139,10 @@ t2_tot = int(df_t2['TOTAL_CALCULADO'].sum())
 t3_tot = int(df_t3['TOTAL_CALCULADO'].sum())
 total_dia_seq = t1_tot + t2_tot + t3_tot
 
-# ─── 6. LÓGICA DE EXIBIÇÃO TURNO A TURNO BASEADA NO CALENDÁRIO SELECIONADO ───
-is_hoje = pd.to_datetime(data_selecionada).date() == hoje_br
+# ─── 6. LÓGICA DE EXIBIÇÃO VISUAL DOS CARDS (REFLEXO DO MOTOR OPERACIONAL) ───
+dt_controle_faturamento = pd.to_datetime(data_selecionada).date()
 
-st_t1, st_t2, st_t3 = "Sequenciado", "Sequenciado", "Sequenciado"
+st_t1, st_t2, st_t3 = "Aguardando", "Aguardando", "Aguardando"
 style_t1, style_t2, style_t3 = "color:#64748b;", "color:#64748b;", "color:#64748b;"
 
 def formatar_fechamento_turno(df_turno):
@@ -143,58 +152,115 @@ def formatar_fechamento_turno(df_turno):
     tot_faltou = max(0, tot_planejado - tot_aderido)
     return f"Aderiu: {tot_aderido} | Faltou: {tot_faltou}", "color:#16a34a; font-size:13px; font-weight:bold;" if tot_faltou == 0 else "color:#dc2626; font-size:13px; font-weight:bold;"
 
-if is_hoje:
-    # Cenário A: Início da manhã, antes do corte do Turno 1
+# --- COMPORTAMENTO DO CARD DO TURNO 1 ---
+if dt_controle_faturamento < hoje_br:
+    st_t1, style_t1 = formatar_fechamento_turno(df_t1)
+elif dt_controle_faturamento == hoje_br:
     if hora_atual < time(5, 0):
-        st_t1 = "Sequenciado"
-    # Cenário B: Turno 1 em andamento
+        st_t1 = "Aguardando"
     elif time(5, 0) <= hora_atual < time(13, 45):
         st_t1 = "EM ANDAMENTO ⚙️"
         style_t1 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
-    # Cenário C: Turno 2 em andamento
-    elif time(13, 30) <= hora_atual < time(22, 15):
+    else:
         st_t1, style_t1 = formatar_fechamento_turno(df_t1)
+else:
+    st_t1 = "Aguardando"
+
+# --- COMPORTAMENTO DO CARD DO TURNO 2 ---
+if dt_controle_faturamento < hoje_br:
+    st_t2, style_t2 = formatar_fechamento_turno(df_t2)
+elif dt_controle_faturamento == hoje_br:
+    if hora_atual < time(13, 30):
+        st_t2 = "Aguardando"
+    elif time(13, 30) <= hora_atual < time(22, 15):
         st_t2 = "EM ANDAMENTO ⚙️"
         style_t2 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
-        
-        # 🔒 AJUSTE DE RECONHECIMENTO: Como o relógio já passou das 05h15 da tarde, o T3 da madrugada passada está trancado
-        st_t3 = "MATE EM MADRUGADA 🔒"
-        style_t3 = "color:#475569; font-size:13px; font-weight:bold; background-color:#f1f5f9; padding:2px 6px; border-radius:4px;"
-    # Cenário D: Turno 3 em andamento ativo
-    elif time(22, 0) <= hora_atual:
-        st_t1, style_t1 = formatar_fechamento_turno(df_t1)
+    else:
         st_t2, style_t2 = formatar_fechamento_turno(df_t2)
-        st_t3 = "EM ANDAMENTO ⚙️"
-        style_t3 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
-    # Cenário E: Madrugada do dia seguinte antes do corte definitivo (00h00 - 05h15)
-    elif hora_atual < time(5, 15):
-        st_t1, style_t1 = formatar_fechamento_turno(df_t1)
-        st_t2, style_t2 = formatar_fechamento_turno(df_t2)
+else:
+    st_t2 = "Aguardando"
+
+# --- COMPORTAMENTO DO CARD DO TURNO 3 (SINCRONIZADO) ---
+if dt_controle_faturamento < hoje_br:
+    st_t3, style_t3 = formatar_fechamento_turno(df_t3)
+elif dt_controle_faturamento == hoje_br:
+    if hora_atual < time(5, 15):
         st_t3 = "EM ANDAMENTO ⚙️"
         style_t3 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
     else:
-        st_t1, style_t1 = formatar_fechamento_turno(df_t1)
-        st_t2, style_t2 = formatar_fechamento_turno(df_t2)
         st_t3, style_t3 = formatar_fechamento_turno(df_t3)
 else:
-    st_t1, style_t1 = formatar_fechamento_turno(df_t1)
-    st_t2, style_t2 = formatar_fechamento_turno(df_t2)
-    st_t3, style_t3 = formatar_fechamento_turno(df_t3)
+    # Se estamos olhando a data de amanhã e o relógio de hoje já cruzou as 22h, a operação física começou!
+    if dt_controle_faturamento == hoje_br + timedelta(days=1) and hora_atual >= time(22, 0):
+        st_t3 = "EM ANDAMENTO ⚙️"
+        style_t3 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
+    else:
+        st_t3 = "Aguardando"
 
 tab_seq, tab_sobras = st.tabs(["✅ Demandas Sequenciadas MI", "⚠️ Carteira Geral de Sobras (Visão Gerencial)"])
 
 # ─── 📂 ABA 1: DEMANDAS SEQUENCIADAS MI ───
 with tab_seq:
-    st.markdown("#### ⏱️ Absorvido por Turno (Acessos Pendentes Sequenciados e Em Andamento)")
+    st.markdown("#### ⏱️ Absorvido por Turno (Métricas Reais de Carga e Rotas Alocadas)")
     col_t1, col_t2, col_t3, col_tot = st.columns(4)
+    
+    t1_cxs = int(df_t1['CXS'].sum()) if not df_t1.empty else 0
+    t1_pls = int(df_t1['PLS'].sum()) if not df_t1.empty else 0
+    
+    t2_cxs = int(df_t2['CXS'].sum()) if not df_t2.empty else 0
+    t2_pls = int(df_t2['PLS'].sum()) if not df_t2.empty else 0
+    
+    t3_cxs = int(df_t3['CXS'].sum()) if not df_t3.empty else 0
+    t3_pls = int(df_t3['PLS'].sum()) if not df_t3.empty else 0
+    
+    total_cxs_dia = t1_cxs + t2_cxs + t3_cxs
+    total_pls_dia = t1_pls + t2_pls + t3_pls
+    total_rotas_dia = len(df_t1) + len(df_t2) + len(df_t3)
+
     with col_t1:
-        st.markdown(f'<div style="background-color:#f9fafb; border-left:5px solid #007ebd; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;"><b>TURNO 1 (05h00 - 13h30)</b><br><span style="{style_t1}">{st_t1}</span><br><h2 style="margin:5px 0 0 0;">{t1_tot} <span style="font-size:12px; color:#6b7280; font-weight:normal;">Acessos</span></h2></div>', unsafe_allow_html=True)
+        st.markdown(f'''
+        <div style="background-color:#f9fafb; border-left:5px solid #007ebd; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;">
+            <b>TURNO 1 (05h00 - 13h30)</b><br>
+            <span style="{style_t1}">{st_t1}</span><br>
+            <h2 style="margin:5px 0 0 0; font-size:24px;">{t1_tot} <span style="font-size:14px; color:#1f2937; font-weight:bold;">Vol. Total</span></h2>
+            <div style="font-size:12px; color:#4b5563; margin-top:2px;">📦 {t1_cxs} Cxs | 🪵 {t1_pls} Plts</div>
+            <div style="font-size:11px; color:#9ca3af; margin-top:1px;">🗺️ {len(df_t1)} Rotas Ativas</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
     with col_t2:
-        st.markdown(f'<div style="background-color:#f9fafb; border-left:5px solid #007ebd; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;"><b>TURNO 2 (13h30 - 22h00)</b><br><span style="{style_t2}">{st_t2}</span><br><h2 style="margin:5px 0 0 0;">{t2_tot} <span style="font-size:12px; color:#6b7280; font-weight:normal;">Acessos</span></h2></div>', unsafe_allow_html=True)
+        st.markdown(f'''
+        <div style="background-color:#f9fafb; border-left:5px solid #007ebd; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;">
+            <b>TURNO 2 (13h30 - 22h00)</b><br>
+            <span style="{style_t2}">{st_t2}</span><br>
+            <h2 style="margin:5px 0 0 0; font-size:24px;">{t2_tot} <span style="font-size:14px; color:#1f2937; font-weight:bold;">Vol. Total</span></h2>
+            <div style="font-size:12px; color:#4b5563; margin-top:2px;">📦 {t2_cxs} Cxs | 🪵 {t2_pls} Plts</div>
+            <div style="font-size:11px; color:#9ca3af; margin-top:1px;">🗺️ {len(df_t2)} Rotas Ativas</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
     with col_t3:
-        st.markdown(f'<div style="background-color:#f9fafb; border-left:5px solid #007ebd; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;"><b>TURNO 3 (22h00 - 05h00)</b><br><span style="{style_t3}">{st_t3}</span><br><h2 style="margin:5px 0 0 0;">{t3_tot} <span style="font-size:12px; color:#6b7280; font-weight:normal;">Acessos</span></h2></div>', unsafe_allow_html=True)
+        st.markdown(f'''
+        <div style="background-color:#f9fafb; border-left:5px solid #007ebd; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;">
+            <b>TURNO 3 (22h00 - 05h00)</b><br>
+            <span style="{style_t3}">{st_t3}</span><br>
+            <h2 style="margin:5px 0 0 0; font-size:24px;">{t3_tot} <span style="font-size:14px; color:#1f2937; font-weight:bold;">Vol. Total</span></h2>
+            <div style="font-size:12px; color:#4b5563; margin-top:2px;">📦 {t3_cxs} Cxs | 🪵 {t3_pls} Plts</div>
+            <div style="font-size:11px; color:#9ca3af; margin-top:1px;">🗺️ {len(df_t3)} Rotas Ativas</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
     with col_tot:
-        st.markdown(f'<div style="background-color:#ecfdf5; border-left:5px solid #10b981; padding:15px; border-radius:6px; border-right:1px solid #a7f3d0; border-top:1px solid #a7f3d0; border-bottom:1px solid #a7f3d0;"><b>📊 DEMANDA TOTAL DO DIA</b><br><span style="color:#10b981; font-weight:bold; font-size:13px;">Agendamento Firme</span><br><h2 style="margin:5px 0 0 0; color:#047857;">{total_dia_seq} <span style="font-size:12px; color:#047857; font-weight:normal;">Acessos Totais</span></h2></div>', unsafe_allow_html=True)
+        st.markdown(f'''
+        <div style="background-color:#ecfdf5; border-left:5px solid #10b981; padding:15px; border-radius:6px; border-right:1px solid #a7f3d0; border-top:1px solid #a7f3d0; border-bottom:1px solid #a7f3d0;">
+            <b>📊 DEMANDA TOTAL DO DIA</b><br>
+            <span style="color:#10b981; font-weight:bold; font-size:13px;">Agendamento Firme</span><br>
+            <h2 style="margin:5px 0 0 0; color:#047857; font-size:24px;">{total_dia_seq} <span style="font-size:14px; color:#047857; font-weight:bold;">Carga Total</span></h2>
+            <div style="font-size:12px; color:#065f46; margin-top:2px;">📦 {total_cxs_dia} Cxs | 🪵 {total_pls_dia} Plts</div>
+            <div style="font-size:11px; color:#047857; margin-top:1px;">🗺️ {total_rotas_dia} Rotas no Total</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
     
     data_titulo_seq = pd.to_datetime(data_selecionada).strftime('%d/%m/%Y') if datas_planejadas else ""
@@ -240,7 +306,7 @@ with tab_sobras:
     s_pls = int(df_sobras_geral['PLS'].sum()) if not df_sobras_geral.empty else 0
     s_tot = s_cxs + s_pls
     
-    st.markdown(f"### 🔎 Sobras da Carteira (Acessos Pendentes Brutos: {s_tot} un)")
+    st.markdown(f"### 🔎 Sobras da Carteira (Volume de Carga Pendente: {s_tot} un)")
     
     sc1, sc2, sc3 = st.columns(3)
     with sc1:
@@ -248,7 +314,7 @@ with tab_sobras:
     with sc2:
         st.markdown(f'<div style="background-color:#f9fafb; border-left:5px solid #ef4444; padding:15px; border-radius:6px; border-right:1px solid #e5e7eb; border-top:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb;"><b>PLS</b><br><h2 style="margin:5px 0 0 0;">{s_pls}</h2><span style="font-size:12px; color:#6b7280;">pls não seq.</span></div>', unsafe_allow_html=True)
     with sc3:
-        st.markdown(f'<div style="background-color:#fef2f2; border-left:5px solid #b91c1c; padding:15px; border-radius:6px; border-right:1px solid #fca5a5; border-top:1px solid #fca5a5; border-bottom:1px solid #fca5a5;"><b>TOTAL</b><br><h2 style="margin:5px 0 0 0;">{s_tot}</h2><span style="font-size:12px; color:#b91c1c;">total não seq.</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="background-color:#fef2f2; border-left:5px solid #b91c1c; padding:15px; border-radius:6px; border-right:1px solid #fca5a5; border-top:1px solid #fca5a5; border-bottom:1px solid #fca5a5;"><b>VOLUME TOTAL</b><br><h2 style="margin:5px 0 0 0;">{s_tot}</h2><span style="font-size:12px; color:#b91c1c;">total carga não seq.</span></div>', unsafe_allow_html=True)
     
     st.markdown("<br>#### 📊 Tabela Dinâmica Consolidada por Data de Percurso e Canal", unsafe_allow_html=True)
     
