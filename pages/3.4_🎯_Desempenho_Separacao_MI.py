@@ -11,7 +11,7 @@ if str(raiz) not in sys.path:
     sys.path.append(str(raiz))
 # ──────────────────────────────────────────────
 
-from src.core.data_loader import carregar_dados_separacao_mi, carregar_matriz_capacidade
+from src.core.data_loader import carregar_dados_separacao_mi, carregar_execucao_turnos
 
 st.set_page_config(page_title="Desempenho MI", layout="wide")
 
@@ -96,7 +96,8 @@ st.markdown("""
 st.markdown("<h1 style='text-align: center; color: #0F766E;'>🎯 Monitor de SLA & Complexidade de Fracionamento MI</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-df_demanda, data_corte_a3, txt_completo_a3 = carregar_dados_separacao()
+# 🛡️ CORREÇÃO DA LINHA 99: Aponta para o motor unificado estável de MI
+df_demanda, data_corte_a3, txt_completo_a3 = carregar_dados_separacao_mi()
 df_execucao = carregar_execucao_turnos()
 
 if df_demanda is not None and df_execucao is not None:
@@ -112,7 +113,7 @@ if df_demanda is not None and df_execucao is not None:
     col_match = 'TURNO_REALIZOU' if 'TURNO_REALIZOU' in df_modelo.columns else ('TURNO_REAL' if 'TURNO_REAL' in df_modelo.columns else None)
     df_modelo['DEU_MATCH'] = df_modelo[col_match].notna() if col_match else False
     
-    # 🛡️ LOCALIZADOR AUTOMÁTICO DE COLUNAS PARA A ABA MI (EVITA QUALQUE KEYERROR)
+    # 🛡️ LOCALIZADOR AUTOMÁTICO DE COLUNAS PARA A ABA MI (EVITA QUALQUER KEYERROR)
     c_cx, c_pl, c_ac = None, None, None
     for col in df_modelo.columns:
         c_upper = str(col).upper().strip()
@@ -165,9 +166,12 @@ if df_demanda is not None and df_execucao is not None:
     for dt_date in datas_tacticas:
         dt_formatada = dt_date.strftime('%d/%m/%Y (%a)')
         
-        condicao_seq = (pd.to_datetime(df_modelo[col_dt_seq], errors='coerce').dt.date == dt_date) & (df_modelo['STATUS'] == "SEQUENCIADO")
-        condicao_nao_seq = (pd.to_datetime(df_modelo[col_dt_per], errors='coerce').dt.date == dt_date) & (df_modelo['STATUS'] == "NÃO SEQUENCIADO")
-        df_dia = df_modelo[condicao_seq | condicao_nao_seq] if not df_modelo.empty else pd.DataFrame()
+        if not df_modelo.empty:
+            condicao_seq = (pd.to_datetime(df_modelo[col_dt_seq], errors='coerce').dt.date == dt_date) & (df_modelo['STATUS'] == "SEQUENCIADO")
+            condicao_nao_seq = (pd.to_datetime(df_modelo[col_dt_per], errors='coerce').dt.date == dt_date) & (df_modelo['STATUS'] == "NÃO SEQUENCIADO")
+            df_dia = df_modelo[condicao_seq | condicao_nao_seq]
+        else:
+            df_dia = pd.DataFrame()
         
         if df_dia.empty:
             st.markdown(f"⚪ **Horizonte: {dt_formatada}** | Sem atividade de MI registrada")
@@ -282,7 +286,7 @@ if df_demanda is not None and df_execucao is not None:
                         if col_canal_check: colunas_exibir.append(col_canal_check)
                             
                         colunas_exibir.extend(['CX_REAL', 'PL_REAL', 'Status_SLA'])
-                        st.dataframe(df_turno_view[colunas_exibir], width="stretch", hide_index=True)
+                        st.dataframe(df_turno_view[colunas_exibir], use_container_width=True, hide_index=True)
         st.markdown("---")
 else:
     st.error("Erro ao estruturar base de Desempenho MI.")
