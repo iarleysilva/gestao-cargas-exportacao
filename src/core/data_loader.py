@@ -45,11 +45,12 @@ def carregar_e_tratar_dados():
 
 def carregar_dados_separacao():
     """
-    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - ME - BLINDADO V5.1]
-    Regra estrita ditada pelo PCO: O Python se guia única e exclusivamente pela 
-    coluna 'STATUS' para validar 'NÃO SEQUENCIADO' e calcula o volume real via CXS + PLS.
+    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - ME - REDIRECIONADO V6.0]
+    Regra estrita ditada pelo PCO: O Python lê a aba unificada de MI, mas filtra 
+    ÚNICA E EXCLUSIVAMENTE as linhas cujo CANAL é 'Direct Sale' (Faturamento ME).
     """
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=2016672411&single=true&output=csv"
+    # 🔒 MUDANÇA DE ALVO: Agora aponta para a aba unificada 'Sequenciamento_MI' (Gid 1330445331)
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
     
     ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"
@@ -67,12 +68,23 @@ def carregar_dados_separacao():
     try:
         df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
+        
+        # 🛡️ FILTRA REQUISITO ME: Isola apenas faturamento de exportação via canal estrito
+        if 'CANAL' in df.columns:
+            df = df[df['CANAL'].astype(str).str.strip() == 'Direct Sale']
+        else:
+            # Fallback de segurança usando a coluna MERCADO preenchida pelo ID do script caso o canal falte
+            if 'MERCADO' in df.columns:
+                df = df[df['MERCADO'].astype(str).str.strip().str.upper() == 'ME']
+            else:
+                return pd.DataFrame(columns=['PERCURSO', 'STATUS', 'VOLUME_TOTAL', 'TURNO_ALOCADO']), data_corte_separacao, dt_a3_str
+
         df_real = pd.DataFrame()
         
         if 'PERCURSO' in df.columns:
             df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
         else:
-            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha.")
+            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha unificada.")
             return None, data_corte_separacao, dt_a3_str
 
         if 'STATUS' in df.columns:
@@ -130,9 +142,8 @@ def carregar_dados_separacao():
 
 def carregar_dados_separacao_mi():
     """
-    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - MI - NOVO V5.2]
-    Conecta e higieniza os dados do Mercado Interno na aba 'Sequenciamento_MI' (Gid 1330445331).
-    Guarda os dados brutos reais de CXS e PLS para exibição aberta e calculada de volumetria.
+    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - MI - NOVO V6.0]
+    Conecta à aba unificada 'Sequenciamento_MI' e filtra fora as linhas que pertencem ao ME (Direct Sale).
     """
     url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
     
@@ -152,6 +163,14 @@ def carregar_dados_separacao_mi():
     try:
         df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
+        
+        # 🛡️ FILTRA REQUISITO MI: Remove da tela tudo o que for Direct Sale (ME)
+        if 'CANAL' in df.columns:
+            df = df[df['CANAL'].astype(str).str.strip() != 'Direct Sale']
+        else:
+            if 'MERCADO' in df.columns:
+                df = df[df['MERCADO'].astype(str).str.strip().str.upper() != 'ME']
+
         df_real = pd.DataFrame()
         
         if 'PERCURSO' in df.columns:
@@ -322,7 +341,6 @@ def carregar_faturamento_ht(ano_selecionado="2026"):
         df.columns = df.columns.str.strip()
         df_fat = pd.DataFrame()
         
-        # Mapeamento espelho compatível para a tela de desempenho HT rodar limpa
         if 'CONCAT' in df.columns:
             df_fat['CONCAT'] = df['CONCAT'].fillna('').astype(str).str.strip()
         if 'Pallets' in df.columns:
@@ -335,9 +353,8 @@ def carregar_faturamento_ht(ano_selecionado="2026"):
 
 def carregar_dados_lastras_novas():
     """
-    [MÓDULO: LASTRAS & SEPARAÇÃO ME V1]
-    Busca os dados diretamente da nova aba unificada 'Sequenciamento_Exportação_v1'
-    vincula diretamente ao seu link CSV de alta performance.
+    [MÓDULO: LASTRAS & SEPARAÇÃO UNIFICADA — ATUALIZADO V6.0]
+    Puxa a matriz de lastras apontando agora para a aba híbrida unificada.
     """
     url_bipes = {
         "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
@@ -345,7 +362,8 @@ def carregar_dados_lastras_novas():
         "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
     }
     
-    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=2016672411&single=true&output=csv"
+    # 🔒 Redirecionado para ler a aba unificada e manter os dados de lastras sintonizados
+    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
     
     lista_turnos = []
     for t_nome in ["TURNO 1", "TURNO 2", "TURNO 3"]:
@@ -413,7 +431,7 @@ def carregar_matriz_capacidade():
     """
     [MÓDULO: PARAMETRIZAÇÃO DINÂMICA]
     Carrega a matriz mestre de restrições diretamente da aba 'atualização' (Gid 1318835351).
-    Retorna o DataFrame bruto e um dicionário mapeado para consultas rápidas.
+    Retorna o DataFrame bruto e um dicionário mapeado para consultas rápidos.
     """
     ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_matriz = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1318835351"

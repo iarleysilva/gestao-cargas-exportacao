@@ -3,10 +3,10 @@ import pandas as pd
 from datetime import datetime, timedelta, time
 import zoneinfo
 
-# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO (AJUSTADO PARA ARQUIVO SOLTO EM PAGES) ───
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
 import sys
 from pathlib import Path
-raiz = Path(__file__).resolve().parents[1]  # Sobe 1 nível (pages/ -> raiz do projeto)
+raiz = Path(__file__).resolve().parents[1]  # Sobe 1 nível
 if str(raiz) not in sys.path:
     sys.path.append(str(raiz))
 # ───────────────────────────────────────────────────────────────────────────────────
@@ -52,7 +52,7 @@ agora_br = datetime.now(fuso_br)
 hoje_br = agora_br.date()
 hora_atual = agora_br.time()
 
-# ─── 4. MOTOR DO VEREDITO DO SLA OPERACIONAL COM GATILHO DE 15 MINUTOS ───
+# ─── 4. MOTOR DO VEREDITO DO SLA OPERACIONAL COM CADEADO DO TURNO 3 ───
 def classificar_fluxo_mi(row):
     status_seq = str(row['STATUS']).upper().strip()
     percurso_id = row['PERCURSO']
@@ -70,7 +70,7 @@ def classificar_fluxo_mi(row):
         return "Sequenciado (Vai Separar)"
         
     if dt_seq < hoje_br:
-        return "ADERIDO ✅" if bipado else "SOBRA"  # Cargas de dias passados sem bipe retornam para a sobra
+        return "ADERIDO ✅" if bipado else "SOBRA"
 
     # ⏱️ REGRAS DE ATIVAÇÃO DE SLA POR JANELA HORÁRIA (HOJE)
     # Turno 1 (05h00 - 13h30). Gatilho definitivo ativa às 13h45.
@@ -80,7 +80,7 @@ def classificar_fluxo_mi(row):
         elif time(5, 0) <= hora_atual < time(13, 45):
             return "Em Andamento"
         else:
-            return "ADERIDO ✅" if bipado else "SOBRA"
+            return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
             
     # Turno 2 (13h30 - 22h00). Gatilho definitivo ativa às 22h15.
     elif turno in ["2", "2.0"]:
@@ -89,22 +89,24 @@ def classificar_fluxo_mi(row):
         elif time(13, 30) <= hora_atual < time(22, 15):
             return "Em Andamento"
         else:
-            return "ADERIDO ✅" if bipado else "SOBRA"
+            return "ADERIDO ✅" if bipado else "NÃO ADERIDO ❌"
             
-    # Turno 3 (22h00 - 05h00). Gatilho definitivo ativa às 05h15 da madrugada seguinte.
+    # Turno 3 (22h00 - 05h00). Cadeado operacional ajustado para acurácia de pátio.
     elif turno in ["3", "3.0"]:
         if time(22, 0) <= hora_atual or hora_atual < time(5, 15):
             return "Em Andamento"
         else:
-            return "ADERIDO ✅" if bipado else "SOBRA"
+            # 🔒 VEREDITO DEFINITIVO: Passou das 05h15 da manhã, o turno está encerrado. 
+            # O dado não volta para a sobra, vira resultado de performance real do dia.
+            return "ADERIDO ✅" if bipado else "TURNO FECHADO"
 
     return "Em Andamento"
 
 df_demanda['SITUACAO_REAL'] = df_demanda.apply(classificar_fluxo_mi, axis=1)
 
-# Separação estrita dos universos de dados após a filtragem horária do SLA
-df_sobras_geral = df_demanda[df_demanda['SITUACAO_REAL'] == "SOBRA"].copy()
-df_seq_geral = df_demanda[df_demanda['SITUACAO_REAL'] != "SOBRA"].copy()
+# As sobras coletam apenas o que é SOBRA pura ou OPORTUNIDADE sem agendamento
+df_sobras_geral = df_demanda[df_demanda['SITUACAO_REAL'].isin(["SOBRA", "OPORTUNIDADE ⚡"])].copy()
+df_seq_geral = df_demanda[~df_demanda['SITUACAO_REAL'].isin(["SOBRA", "OPORTUNIDADE ⚡"])].copy()
 
 # ─── 5. FILTROS DA SIDEBAR ───
 st.sidebar.header("🗓️ Filtro MI Operação")
@@ -134,7 +136,6 @@ is_hoje = pd.to_datetime(data_selecionada).date() == hoje_br
 st_t1, st_t2, st_t3 = "Sequenciado", "Sequenciado", "Sequenciado"
 style_t1, style_t2, style_t3 = "color:#64748b;", "color:#64748b;", "color:#64748b;"
 
-# Montagem das strings de performance pós-fechamento do turno
 def formatar_fechamento_turno(df_turno):
     tot_planejado = int(df_turno['TOTAL_CALCULADO'].sum())
     df_bipados = df_turno[df_turno['PERCURSO'].isin(percursos_bipados_fabrica)]
@@ -143,27 +144,39 @@ def formatar_fechamento_turno(df_turno):
     return f"Aderiu: {tot_aderido} | Faltou: {tot_faltou}", "color:#16a34a; font-size:13px; font-weight:bold;" if tot_faltou == 0 else "color:#dc2626; font-size:13px; font-weight:bold;"
 
 if is_hoje:
-    # Turno 1 ativo pelo horário do sistema
-    if time(5, 0) <= hora_atual < time(13, 45):
+    # Cenário A: Início da manhã, antes do corte do Turno 1
+    if hora_atual < time(5, 0):
+        st_t1 = "Sequenciado"
+    # Cenário B: Turno 1 em andamento
+    elif time(5, 0) <= hora_atual < time(13, 45):
         st_t1 = "EM ANDAMENTO ⚙️"
         style_t1 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
-    # Turno 2 ativo pelo horário do sistema
+    # Cenário C: Turno 2 em andamento
     elif time(13, 30) <= hora_atual < time(22, 15):
         st_t1, style_t1 = formatar_fechamento_turno(df_t1)
         st_t2 = "EM ANDAMENTO ⚙️"
         style_t2 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
-    # Turno 3 ativo pelo horário do sistema
-    elif time(22, 0) <= hora_atual or hora_atual < time(5, 15):
+        
+        # 🔒 AJUSTE DE RECONHECIMENTO: Como o relógio já passou das 05h15 da tarde, o T3 da madrugada passada está trancado
+        st_t3 = "MATE EM MADRUGADA 🔒"
+        style_t3 = "color:#475569; font-size:13px; font-weight:bold; background-color:#f1f5f9; padding:2px 6px; border-radius:4px;"
+    # Cenário D: Turno 3 em andamento ativo
+    elif time(22, 0) <= hora_atual:
         st_t1, style_t1 = formatar_fechamento_turno(df_t1)
         st_t2, style_t2 = formatar_fechamento_turno(df_t2)
         st_t3 = "EM ANDAMENTO ⚙️"
         style_t3 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
-    # Fim das operações de hoje
+    # Cenário E: Madrugada do dia seguinte antes do corte definitivo (00h00 - 05h15)
+    elif hora_atual < time(5, 15):
+        st_t1, style_t1 = formatar_fechamento_turno(df_t1)
+        st_t2, style_t2 = formatar_fechamento_turno(df_t2)
+        st_t3 = "EM ANDAMENTO ⚙️"
+        style_t3 = "color:#ea580c; font-size:18px; font-weight:900; background-color:#ffedd5; padding:2px 6px; border-radius:4px;"
     else:
         st_t1, style_t1 = formatar_fechamento_turno(df_t1)
         st_t2, style_t2 = formatar_fechamento_turno(df_t2)
         st_t3, style_t3 = formatar_fechamento_turno(df_t3)
-elif pd.to_datetime(data_selecionada).date() < hoje_br:
+else:
     st_t1, style_t1 = formatar_fechamento_turno(df_t1)
     st_t2, style_t2 = formatar_fechamento_turno(df_t2)
     st_t3, style_t3 = formatar_fechamento_turno(df_t3)
@@ -221,7 +234,7 @@ with tab_seq:
     else:
         st.info("Nenhum percurso sequenciado de MI encontrado para a data selecionada.")
 
-# ─── 📂 ABA 2: CARTEIRA GERAL DE SOBRAS (GOVERNADA RIGOROSAMENTE PELA DT_PERCURSO) ───
+# ─── 📂 ABA 2: CARTEIRA GERAL DE SOBRAS ───
 with tab_sobras:
     s_cxs = int(df_sobras_geral['CXS'].sum()) if not df_sobras_geral.empty else 0
     s_pls = int(df_sobras_geral['PLS'].sum()) if not df_sobras_geral.empty else 0
