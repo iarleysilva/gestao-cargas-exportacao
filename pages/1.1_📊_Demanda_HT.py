@@ -1,20 +1,20 @@
 import streamlit as st
 import os
 import pandas as pd
-from datetime import datetime, time
-import zoneinfo  # <--- CORRIGIDO: Injeção explícita da biblioteca de fuso horário
+from datetime import datetime, timedelta, time
+import zoneinfo
 
-# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO (AJUSTADO PARA ARQUIVO SOLTO EM PAGES) ───
+# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
 import sys
 from pathlib import Path
-raiz = Path(__file__).resolve().parents[1]  # Sobe 1 nível (pages/ -> raiz do projeto)
+raiz = Path(__file__).resolve().parents[1]  # Sobe 1 nível (pages/ -> raiz)
 if str(raiz) not in sys.path:
     sys.path.append(str(raiz))
 # ───────────────────────────────────────────────────────────────────────────────────
 
 from src.core.data_loader import carregar_e_tratar_dados, carregar_realizado_ht, carregar_matriz_capacidade
 
-# 1. Configuração Única da Página (CORRIGIDO: Removida a duplicidade que travava o sistema)
+# 1. Configuração Única da Página
 st.set_page_config(
     page_title="Gestão de Cargas - Exportação",
     layout="wide",
@@ -34,11 +34,13 @@ _, tracking_pco = carregar_matriz_capacidade()
 
 # 3. Barra Lateral (Sidebar) com o Card de Última Atualização real do Sheets
 st.sidebar.title("🚢 Navegação & Status")
+st.sidebar.write(f"⏰ **Relógio Sistema:** {agora_br.strftime('%H:%M')}")
 
 if df is not None:
     st.sidebar.info(f"**Última Atualização da Base:**\n{ultima_atualizacao}")
 else:
     st.sidebar.error("⚠️ Não foi possível carregar a base de dados do Google Sheets.")
+    st.stop()
 
 # 4. Título Principal do Aplicativo
 st.title("📊 Acompanhamento de Cargas de Exportação")
@@ -47,22 +49,16 @@ if df is not None:
     # Garante que a coluna de paletes é numérica para as validações de maior que zero
     df['Total_Plt_Percurso'] = pd.to_numeric(df['Total_Plt_Percurso'], errors='coerce').fillna(0).astype(int)
     
-    # ─────────────────────────────────────────────────────────────────
-    # CRIAÇÃO DAS ABAS (Estrutura com as 3 abas solicitadas)
-    # ─────────────────────────────────────────────────────────────────
+    # ABAS PRINCIPAIS DO SISTEMA
     tab_indicadores, tab_sobras, tab_consulta = st.tabs([
         "📈 Indicadores Gerais", 
         "⚠️ Carteira Geral de Sobras (Não Sequenciadas)", 
         "🔍 Consulta por Fatura/Percurso"
     ])
     
-    # Lista de colunas oficiais para exibição da aba corrente e consulta
     colunas_exibicao = ['Status', 'Fatura', 'Percurso', 'Total_Plt_Percurso', 'Data_Carregamento', 'Modal']
-    
-    # Filtra a base base de cálculos removendo sempre o que for zero
     df_validos = df[df['Total_Plt_Percurso'] > 0].copy()
     
-    # Estilização CSS dos grandes cards do topo
     estilo_card_topo = """
     <div style="
         background-color: #f1f3f5; 
@@ -79,26 +75,22 @@ if df is not None:
     """
 
     # ─────────────────────────────────────────────────────────────────
-    # ABA 1: INDICADORES GERAIS (A Demanda governa o Cálculo de Capacidade)
+    # ABA 1: INDICADORES GERAIS (Governança e Janelas de Auditoria)
     # ─────────────────────────────────────────────────────────────────
     with tab_indicadores:
         st.markdown("### 📈 Painel de Capacidade e Volumetria")
         st.write("Acompanhamento fixo dos principais períodos e consulta personalizada por data.")
         st.markdown("---")
         
-        # Definição automática das datas de Hoje e Amanhã
         hoje = pd.Timestamp(hoje_br)
         amanha = hoje + pd.Timedelta(days=1)
         
-        # Cálculo 1: Volume focado em Hoje
         df_hoje = df_validos[df_validos['Data_Carregamento'].dt.date == hoje_br]
         total_plts_hoje = int(df_hoje['Total_Plt_Percurso'].sum())
         
-        # Cálculo 2: Volume focado em Amanhã
         df_amanha = df_validos[df_validos['Data_Carregamento'].dt.date == amanha.date()]
         total_plts_amanha = int(df_amanha['Total_Plt_Percurso'].sum())
 
-        # Cálculo 3: Total Geral
         total_plts_geral = int(df_validos['Total_Plt_Percurso'].sum())
         cargas_geral = len(df_validos)
         
@@ -112,9 +104,11 @@ if df is not None:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # ─── ⚖️ VALIDAÇÃO DE TURNOS E TRAVA DE LIMBO ───
+        # ─── ⚖️ MOTOR DE GOVERNANÇA DE PÁTIO DINÂMICO ───
+        st.markdown("### ⏱ ...")
         st.markdown("### ⏱️ Governança de Pátio e Validação de Turnos (Hoje)")
         
+        # Recuperação das capacidades padrão do PCO
         ciclos_t1 = tracking_pco.get(('HT', '1', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '1.0', 'CICLOS', 'POR_TURNO'), 4))
         rend_t1 = tracking_pco.get(('HT', '1', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '1.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 27))
         estimativa_t1 = ciclos_t1 * rend_t1 
@@ -127,6 +121,7 @@ if df is not None:
         rend_t3 = tracking_pco.get(('HT', '3', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '3.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
         estimativa_t3 = ciclos_t3 * rend_t3
         
+        # Puxa o realizado consolidado na aba do Sheets
         df_real_hoje = df_realizado_ht[df_realizado_ht['DATA_PROD'].dt.date == hoje_br] if df_realizado_ht is not None else pd.DataFrame()
         t1_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('I$|1', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
         t2_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('II$|2', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
@@ -134,72 +129,109 @@ if df is not None:
         
         dia_semana_hoje = hoje_br.weekday()
 
-        if dia_semana_hoje == 6:
+        # Inicialização das variáveis operacionais
+        status_t1_txt, status_t2_txt, status_t3_txt = "Aguardando", "Aguardando", "Aguardando"
+        cor_t1, cor_t2, cor_t3 = "#64748b", "#64748b", "#64748b"
+        carga_real_t1, carga_real_t2, carga_real_t3 = estimativa_t1, estimativa_t2, estimativa_t3
+
+        if dia_semana_hoje == 6:  # Domingo
             status_t1_txt = "🛑 Fábrica Fechada (Plantão inicia às 22h)"
-            cor_t1 = "#64748b"
-            carga_real_t1 = 0
             status_t2_txt = "🛑 Fábrica Fechada (Plantão inicia às 22h)"
-            cor_t2 = "#64748b"
-            carga_real_t2 = 0
+            carga_real_t1, carga_real_t2 = 0, 0
         else:
-            if hora_atual < time(13, 30):
+            # ─── LOGIC TRAP: TURNO 1 DYNAMIC SLA ───
+            if hora_atual < time(5, 0):
+                status_t1_txt = "⏳ Aguardando Início de Turno"
+                cor_t1 = "#64748b"
+            elif time(5, 0) <= hora_atual < time(13, 30):
                 status_t1_txt = "⚙️ Em Andamento / Previsto"
                 cor_t1 = "#007ebd"
-                carga_real_t1 = os.environ.get('ESTIMATIVA_T1', estimativa_t1)
-            elif hora_atual >= time(13, 30) and t1_confirmado == 0:
-                status_t1_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+                carga_real_t1 = t1_confirmado if t1_confirmado > 0 else estimativa_t1
+            elif time(13, 30) <= hora_atual < time(13, 45):
+                status_t1_txt = "⏳ Fim de Turno - Aguardando Auditoria"
                 cor_t1 = "#d97706"
-                carga_real_t1 = estimativa_t1 
+                carga_real_t1 = t1_confirmado if t1_confirmado > 0 else estimativa_t1
             else:
-                status_t1_txt = "✅ Concluído e Consolidado no Sheets"
-                cor_t1 = "#25a244"
-                carga_real_t1 = t1_confirmado 
+                if t1_confirmado > 0:
+                    status_t1_txt = "✅ Concluído e Consolidado"
+                    cor_t1 = "#25a244"
+                    carga_real_t1 = t1_confirmado
+                else:
+                    status_t1_txt = "❌ Finalizado Sem Informação"
+                    cor_t1 = "#475569"
+                    carga_real_t1 = 0
 
-            if hora_atual < time(22, 0):
+            # ─── LOGIC TRAP: TURNO 2 DYNAMIC SLA ───
+            if hora_atual < time(13, 30):
+                status_t2_txt = "⏳ Aguardando Início de Turno"
+                cor_t2 = "#64748b"
+            elif time(13, 30) <= hora_atual < time(22, 0):
                 status_t2_txt = "⚙️ Em Andamento / Previsto"
                 cor_t2 = "#007ebd"
-                carga_real_t2 = estimativa_t2
-            elif hora_atual >= time(22, 0) and t2_confirmado == 0:
-                status_t2_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+                carga_real_t2 = t2_confirmado if t2_confirmado > 0 else estimativa_t2
+            elif time(22, 0) <= hora_atual < time(22, 15):
+                status_t2_txt = "⏳ Fim de Turno - Aguardando Auditoria"
                 cor_t2 = "#d97706"
-                carga_real_t2 = estimativa_t2
+                carga_real_t2 = t2_confirmado if t2_confirmado > 0 else estimativa_t2
             else:
-                status_t2_txt = "✅ Concluído e Consolidado no Sheets"
-                cor_t2 = "#25a244"
-                carga_real_t2 = t2_confirmado
+                if t2_confirmado > 0:
+                    status_t2_txt = "✅ Concluído e Consolidado"
+                    cor_t2 = "#25a244"
+                    carga_real_t2 = t2_confirmado
+                else:
+                    status_t2_txt = "❌ Finalizado Sem Informação"
+                    cor_t2 = "#475569"
+                    carga_real_t2 = 0
 
+        # ─── LOGIC TRAP: TURNO 3 DYNAMIC SLA & DEGRADAÇÃO DE CAPACIDADE ───
         if dia_semana_hoje == 5 and hora_atual >= time(22, 0):
             status_t3_txt = "🛑 Fim de Plantão (Retorno Domingo 22h)"
-            cor_t3 = "#64748b"
             carga_real_t3 = 0
         elif dia_semana_hoje == 6 and hora_atual < time(22, 0):
             status_t3_txt = "⏳ Aguardando Início do Plantão Noturno"
-            cor_t3 = "#64748b"
             carga_real_t3 = 0
         else:
             if hora_atual >= time(22, 0) or hora_atual < time(5, 0):
-                status_t3_txt = "⚙️ Noturno Em Andamento ➔ (Jornada de Segunda)" if dia_semana_hoje == 6 else "⚙️ Noturno Em Andamento"
+                status_t3_txt = "⚙️ Noturno Em Andamento ➔ (Jornada Segunda)" if dia_semana_hoje == 6 else "⚙️ Noturno Em Andamento"
                 cor_t3 = "#007ebd"
-                carga_real_t3 = estimativa_t3
-            elif hora_atual >= time(5, 0) and t3_confirmado == 0:
-                status_t3_txt = "⏳ Turno Passou - Retido Aguardando Atualização Técnica"
+                carga_real_t3 = t3_confirmado if t3_confirmado > 0 else estimativa_t3
+                
+                # 🪵 ENGENHARIA DE DEGRADAÇÃO DA CAPACIDADE (AUDITORIA DAS 02H00 AS 05h00)
+                if hora_atual >= time(2, 0) and hora_atual < time(5, 0) and t3_confirmado == 0:
+                    # Se passou das 02:00 e o pátio não inseriu bipes, calcula a perda de estufas por decréscimo de tempo
+                    horas_ociosas = (agora_br - agora_br.replace(hour=2, minute=0, second=0)).seconds // 3600
+                    ciclos_perdidos = min(int(horas_ociosas // 2) + 1, ciclos_t3)
+                    estimativa_t3 = max(0, (ciclos_t3 - ciclos_perdidos) * rend_t3)
+                    carga_real_t3 = estimativa_t3
+                    status_t3_txt = f"⚙️ Noturno Ocioso (Perda de {ciclos_perdidos} Estufas)"
+                    cor_t3 = "#ea580c"
+            
+            elif time(5, 0) <= hora_atual < time(5, 15):
+                status_t3_txt = "⏳ Fim de Turno - Aguardando Auditoria"
                 cor_t3 = "#d97706"
-                carga_real_t3 = estimativa_t3
+                carga_real_t3 = t3_confirmado if t3_confirmado > 0 else estimativa_t3
             else:
-                status_t3_txt = "✅ Concluído e Consolidado no Sheets"
-                cor_t3 = "#25a244"
-                carga_real_t3 = t3_confirmado
+                if t3_confirmado > 0:
+                    status_t3_txt = "✅ Concluído e Consolidado"
+                    cor_t3 = "#25a244"
+                    carga_real_t3 = t3_confirmado
+                else:
+                    status_t3_txt = "❌ Finalizado Sem Informação"
+                    cor_t3 = "#475569"
+                    carga_real_t3 = 0
 
+        # Renderização dos Cards Visuais Atualizados na Tela
         ct1, ct2, ct3 = st.columns(3)
         with ct1:
-            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t1}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 1 (05h00 - 13h30)</span><h4 style="margin: 5px 0; color: {cor_t1};">{status_t1_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t1} PLT (Plan: {estimativa_t1} / Real: {t1_confirmado})</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t1}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 1 (05h00 - 13h30)</span><h4 style="margin: 5px 0; color: {cor_t1};">{status_t1_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t1} PLT (Plan: {ciclos_t1 * rend_t1} / Real: {t1_confirmado})</p></div>', unsafe_allow_html=True)
         with ct2:
-            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t2}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 2 (13h30 - 22h00)</span><h4 style="margin: 5px 0; color: {cor_t2};">{status_t2_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t2} PLT (Plan: {estimativa_t2} / Real: {t2_confirmado})</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t2}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 2 (13h30 - 22h00)</span><h4 style="margin: 5px 0; color: {cor_t2};">{status_t2_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t2} PLT (Plan: {ciclos_t2 * rend_t2} / Real: {t2_confirmado})</p></div>', unsafe_allow_html=True)
         with ct3:
-            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t3}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 3 (22h00 - 05h00)</span><h4 style="margin: 5px 0; color: {cor_t3};">{status_t3_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t3} PLT (Plan: {estimativa_t3} / Real: {t3_confirmado})</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t3}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 3 (22h00 - 05h00)</span><h4 style="margin: 5px 0; color: {cor_t3};">{status_t3_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t3} PLT (Plan: {ciclos_t3 * rend_t3} / Real: {t3_confirmado})</p></div>', unsafe_allow_html=True)
 
         st.markdown("---")
         
+        # ─── CALCULO DO DIAGNÓSTICO DO HT DINÂMICO ───
         st.markdown("#### 🔍 Consultar Horizonte de Carga e Estufagem Necessária")
         data_minima = df['Data_Carregamento'].min().date()
         data_maxima = df['Data_Carregamento'].max().date()
@@ -305,9 +337,9 @@ if df is not None:
         
         col1, col2 = st.columns(2)
         with col1:
-            busca_fatura = st.text_input("Digite o número da Fatura (ou parte dele):", key="fatura_cons").strip()
+            busca_fatura = st.text_input("Digite o número da Fatura (or parte dele):", key="fatura_cons").strip()
         with col2:
-            busca_percurso = st.text_input("Digite o Percurso (ou parte dele):", key="perc_cons").strip()
+            busca_percurso = st.text_input("Digite o Percurso (or parte dele):", key="perc_cons").strip()
             
         df_filtrado = df.copy()
         
