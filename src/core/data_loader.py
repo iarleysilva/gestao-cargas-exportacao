@@ -46,11 +46,11 @@ def carregar_e_tratar_dados():
 def carregar_dados_separacao():
     """
     [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - ME - REDIRECIONADO V6.0]
-    Regra estrita ditada pelo PCO: O Python lê a aba unificada de MI, mas filtra 
-    ÚNICA E EXCLUSIVAMENTE as linhas cujo CANAL é 'Direct Sale' (Faturamento ME).
+    Regra estrita ditada pelo PCO: O Python lê a aba unificada de faturamento (Gid 1410794624), 
+    mas filtra ÚNICA E EXCLUSIVAMENTE as linhas cujo CANAL é 'Direct Sale' (Faturamento ME).
     """
-    # 🔒 MUDANÇA DE ALVO: Agora aponta para a aba unificada 'Sequenciamento_MI' (Gid 1330445331)
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
+    # 🔒 MUDANÇA DE ALVO APONTADA PARA A NOVA ABA UNIFICADA CORRETA (Gid 1410794624)
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
     
     ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"
@@ -69,11 +69,10 @@ def carregar_dados_separacao():
         df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # 🛡️ FILTRA REQUISITO ME: Isola apenas faturamento de exportação via canal estrito
+        # 🛡️ ISOLAMENTO EXCLUSIVO DO MERCADO EXTERNO (ME) VIA CANAL DE CONTRATO
         if 'CANAL' in df.columns:
             df = df[df['CANAL'].astype(str).str.strip() == 'Direct Sale']
         else:
-            # Fallback de segurança usando a coluna MERCADO preenchida pelo ID do script caso o canal falte
             if 'MERCADO' in df.columns:
                 df = df[df['MERCADO'].astype(str).str.strip().str.upper() == 'ME']
             else:
@@ -143,9 +142,8 @@ def carregar_dados_separacao():
 def carregar_dados_separacao_mi():
     """
     [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - MI - NOVO V6.0]
-    Conecta à aba unificada 'Sequenciamento_MI' e filtra fora as linhas que pertencem ao ME (Direct Sale).
+    Conecta à aba unificada 'Sequenciamento_MI' (Gid 1410794624) e filtra fora as linhas do ME (Direct Sale).
     """
-    # 🔒 LINK ATUALIZADO COM O SEU NOVO GID DO GOOGLE SHEETS!
     url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
     
     ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
@@ -230,7 +228,6 @@ def carregar_dados_separacao_mi():
 
         df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
         df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
-        
         df_real = df_real.drop_duplicates(subset=['PERCURSO'], keep='first').drop(columns=['prioridade_status'])
         
         return df_real, data_corte_separacao, dt_a3_str
@@ -354,8 +351,8 @@ def carregar_faturamento_ht(ano_selecionado="2026"):
 
 def carregar_dados_lastras_novas():
     """
-    [MÓDULO: LASTRAS & SEPARAÇÃO UNIFICADA — ATUALIZADO V6.0]
-    Puxa a matriz de lastras apontando agora para a aba híbrida unificada.
+    [MÓDULO: LASTRAS & SEPARAÇÃO UNIFICADA]
+    Puxa a matriz de lastras apontando para a aba unificada de faturamento (Gid 1410794624).
     """
     url_bipes = {
         "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
@@ -363,8 +360,7 @@ def carregar_dados_lastras_novas():
         "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
     }
     
-    # 🔒 Redirecionado para ler a aba unificada e manter os dados de lastras sintonizados
-    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1330445331&single=true&output=csv"
+    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
     
     lista_turnos = []
     for t_nome in ["TURNO 1", "TURNO 2", "TURNO 3"]:
@@ -432,7 +428,7 @@ def carregar_matriz_capacidade():
     """
     [MÓDULO: PARAMETRIZAÇÃO DINÂMICA]
     Carrega a matriz mestre de restrições diretamente da aba 'atualização' (Gid 1318835351).
-    Retorna o DataFrame bruto e um dicionário mapeado para consultas rápidos.
+    Retorna o DataFrame bruto e um dicionário mapeado para consultas rápidas.
     """
     ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
     url_matriz = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1318835351"
