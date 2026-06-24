@@ -13,7 +13,7 @@ URL_HT_REALIZADO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQUBeTkC4k0u
 
 # 2. Planilha: Sequenciamento_previsão carregamento
 URL_UNIFICADA_MI_ME = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=952730620&single=true&output=csv"
-URL_LASTRAS_NOVAS   = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=363154865&single=true&output=csv"
+URL_LASTRAS_NOVAS   = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1567949357&single=true&output=csv"
 
 # 3. Planilha: PRODUTIVIDADE TURNO POR ACESSO MI e ME
 URL_BIPES_TURNOS = {
@@ -22,6 +22,8 @@ URL_BIPES_TURNOS = {
     "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
 }
 
+# 🔒 Cache independente para Demanda HT (Validade: 5 minutos)
+@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Módulo Demanda HT...")
 def carregar_e_tratar_dados():
     """ [MÓDULO: DEMANDA HT] """
     try:
@@ -52,7 +54,8 @@ def carregar_e_tratar_dados():
         return None, "Erro"
 
 
-@st.cache_data(ttl=30)
+# 🔒 Cache independente para Mercado Externo (Validade: 5 minutos)
+@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Módulo Mercado Externo (ME)...")
 def carregar_dados_separacao():
     """ [MÓDULO: MERCADO EXTERNO (ME)] """
     try:
@@ -122,7 +125,8 @@ def carregar_dados_separacao():
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
-@st.cache_data(ttl=30)
+# 🔒 Cache independente para Mercado Interno (Validade: 5 minutos)
+@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Módulo Mercado Interno (MI)...")
 def carregar_dados_separacao_mi():
     """ [MÓDULO: MERCADO INTERNO (MI)] """
     try:
@@ -178,6 +182,8 @@ def carregar_dados_separacao_mi():
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
+# 🔒 Cache independente para Execução de Turnos (Validade: 5 minutos)
+@st.cache_data(ttl=300, show_spinner="⏳ Atualizando Produtividade dos Turnos...")
 def carregar_execucao_turnos():
     """ [MÓDULO: BIPES DOS TURNOS] """
     df_consolidado = []
@@ -201,8 +207,10 @@ def carregar_execucao_turnos():
     return pd.DataFrame(columns=['PERCURSO', 'TURNO_REALIZOU'])
 
 
+# 🔒 Cache independente para Realizado HT (Validade: 5 minutos)
+@st.cache_data(ttl=300, show_spinner="⏳ Puxando Histórico Realizado HT...")
 def carregar_realizado_ht(ano_selecionado="2026"):
-    """ [MÓDULO: REALIZADO HT] """
+    """ [MÓDULO: REALIZADO HT - CORRIGIDO] """
     try:
         df = pd.read_csv(URL_HT_REALIZADO, dtype=str)
         if df.empty: return None
@@ -214,6 +222,7 @@ def carregar_realizado_ht(ano_selecionado="2026"):
         df_realizado['PERCURSO_RAW'] = df['Percurso'].fillna('').astype(str).str.strip().str.replace('.0', '', regex=False)
         df_realizado['PALLETS'] = pd.to_numeric(df['Pallets'], errors='coerce').fillna(0).astype(int)
         
+        # 🔌 Mantendo o nome exato em português conforme sua planilha
         txt_data_original = df['data produção ini'].fillna('').astype(str).str.strip()
         df_realizado['DATA_PROD'] = pd.to_datetime(txt_data_original, format='mixed', errors='coerce')
         df_realizado['NUM_MES'] = df_realizado['DATA_PROD'].dt.month.fillna(6).astype(int)
@@ -226,6 +235,8 @@ def carregar_realizado_ht(ano_selecionado="2026"):
         return None
 
 
+# 🔒 Cache independente para Faturamento HT (Validade: 5 minutos)
+@st.cache_data(ttl=300)
 def carregar_faturamento_ht(ano_selecionado="2026"):
     """ [MÓDULO: FATURAMENTO HT] """
     try:
@@ -237,37 +248,57 @@ def carregar_faturamento_ht(ano_selecionado="2026"):
         return None
 
 
+# 🔒 Cache independente para Sequenciamento de Lastras (Validade: 5 minutos)
+# 🛡️ VERSÃO FINAL V7.4: Inteligente e adaptável para cabeçalhos unificados ou originais
+@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Painel de Lastras...")
 def carregar_dados_lastras_novas():
-    """ [MÓDULO: SEQUENCIAMENTO DE LASTRAS - V7.2] """
-    df_realizado = carregar_execucao_turnos()
-
+    """ [MÓDULO: SEQUENCIAMENTO DE LASTRAS - PADRÃO MI/ME FLEXÍVEL] """
     try:
         df_tec = pd.read_csv(URL_LASTRAS_NOVAS)
+        if df_tec.empty:
+            return pd.DataFrame(columns=['PERCURSO', 'TURNO_REALIZOU']), pd.DataFrame()
+            
         df_tec.columns = [str(c).strip() for c in df_tec.columns]
-        
         df_real_lastras = pd.DataFrame()
-        if 'Percurso' in df_tec.columns:
-            df_real_lastras['PERCURSO'] = df_tec['Percurso'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+        
+        # Percurso inteligente (aceita 'Percurso' ou 'percurso')
+        col_percurso = next((c for c in df_tec.columns if c.lower() == 'percurso'), None)
+        if col_percurso:
+            df_real_lastras['PERCURSO'] = df_tec[col_percurso].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         else:
-            return df_realizado, pd.DataFrame()
-
+            return pd.DataFrame(columns=['PERCURSO', 'TURNO_REALIZOU']), pd.DataFrame()
+        
+        # Status, Canais e Mercados
         df_real_lastras['STATUS'] = df_tec['STATUS'].astype(str).str.strip().str.upper() if 'STATUS' in df_tec.columns else "NÃO SEQUENCIADO"
         df_real_lastras['CANAL'] = df_tec['CANAL'].astype(str).str.strip() if 'CANAL' in df_tec.columns else "Não Informado"
         df_real_lastras['tipo_unitizacao'] = df_tec['tipo_unitizacao'].astype(str).str.strip().str.upper() if 'tipo_unitizacao' in df_tec.columns else "NÃO INFORMADO"
         df_real_lastras['MOTIVO'] = df_tec['MOTIVO'].astype(str).str.strip() if 'MOTIVO' in df_tec.columns else ""
         df_real_lastras['MERCADO'] = df_tec['MERCADO'].astype(str).str.strip().str.upper() if 'MERCADO' in df_tec.columns else "LASTRA"
-        df_real_lastras['qtd_itens'] = pd.to_numeric(df_tec['qtd_itens'], errors='coerce').fillna(0).astype(int)
+        df_real_lastras['qtd_itens'] = pd.to_numeric(df_tec['qtd_itens'], errors='coerce').fillna(0).astype(int) if 'qtd_itens' in df_tec.columns else 0
 
-        f_maquina = pd.to_numeric(df_tec['120X270'], errors='coerce').fillna(0).astype(int)
-        f_papelao = pd.to_numeric(df_tec['160X160'], errors='coerce').fillna(0).astype(int)
-        
+        # Regra específica e obrigatória de cubagem do Lastrão (frentes especiais)
+        f_maquina = pd.to_numeric(df_tec['120X270'], errors='coerce').fillna(0).astype(int) if '120X270' in df_tec.columns else 0
+        f_papelao = pd.to_numeric(df_tec['160X160'], errors='coerce').fillna(0).astype(int) if '160X160' in df_tec.columns else 0
         df_real_lastras['120X270'] = f_maquina
         df_real_lastras['160X160'] = f_papelao
-        df_real_lastras['TOTAL_GERAL'] = f_maquina + f_papelao
+        
+        # Puxa o TOTAL_GERAL de forma flexível (aceita sua padronização ou o nome com espaço original)
+        if 'TOTAL_GERAL' in df_tec.columns:
+            df_real_lastras['TOTAL_GERAL'] = pd.to_numeric(df_tec['TOTAL_GERAL'], errors='coerce').fillna(0).astype(int)
+        elif 'Total Geral' in df_tec.columns:
+            df_real_lastras['TOTAL_GERAL'] = pd.to_numeric(df_tec['Total Geral'], errors='coerce').fillna(0).astype(int)
+        else:
+            df_real_lastras['TOTAL_GERAL'] = f_maquina + f_papelao
 
-        df_real_lastras['DT_PERCURSO'] = pd.to_datetime(df_tec['DT PERCURSO'], dayfirst=True, errors='coerce') if 'DT PERCURSO' in df_tec.columns else pd.NaT
+        # Datas dinâmicas (aceita tanto o padronizado 'DT PERCURSO' quanto o original 'data_percurso')
+        if 'DT PERCURSO' in df_tec.columns:
+            df_real_lastras['DT_PERCURSO'] = pd.to_datetime(df_tec['DT PERCURSO'], dayfirst=True, errors='coerce')
+        else:
+            df_real_lastras['DT_PERCURSO'] = pd.to_datetime(df_tec['data_percurso'], dayfirst=True, errors='coerce') if 'data_percurso' in df_tec.columns else pd.NaT
+            
         df_real_lastras['DT_SEQUENCIADO'] = pd.to_datetime(df_tec['DATA SEQUENCIADO'], dayfirst=True, errors='coerce') if 'DATA SEQUENCIADO' in df_tec.columns else df_real_lastras['DT_PERCURSO']
 
+        # Alocação de turnos padrão da matriz
         for t_base in ['BASE T1', 'BASE T2', 'BASE T3']:
             df_real_lastras[t_base.replace(' ', '_')] = pd.to_numeric(df_tec[t_base], errors='coerce').fillna(0).astype(int) if t_base in df_tec.columns else 0
 
@@ -278,12 +309,18 @@ def carregar_dados_lastras_novas():
             df_real_lastras['TURNO_ALOCADO'] = "1.0"
 
         df_real_lastras = df_real_lastras.dropna(subset=['PERCURSO'])
-        return df_realizado, df_real_lastras
+        
+        # Controle de bipes locais para mitigar concorrência de requisições http 400
+        df_bipes_vazio = pd.DataFrame(columns=['PERCURSO', 'TURNO_REALIZOU'])
+        return df_bipes_vazio, df_real_lastras
+        
     except Exception as e:
-        st.error(f"Erro na aba de Lastras v7.2: {e}")
-        return df_realizado, pd.DataFrame()
+        st.error(f"Erro na aba de Lastras v7.4: {e}")
+        return pd.DataFrame(columns=['PERCURSO', 'TURNO_REALIZOU']), pd.DataFrame()
 
 
+# 🔒 Cache independente para Matriz de Capacidade (Validade: 5 minutos)
+@st.cache_data(ttl=300, show_spinner="⏳ Carregando Parâmetros Mestre...")
 def carregar_matriz_capacidade():
     """ [MÓDULO: PARAMETRIZAÇÃO DINÂMICA] """
     try:
