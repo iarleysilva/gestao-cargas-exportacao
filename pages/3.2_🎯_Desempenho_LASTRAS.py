@@ -1,73 +1,48 @@
 import streamlit as st
 import pandas as pd
-from datetime import timedelta, datetime, time
-import zoneinfo
+from src.core.data_loader import carregar_dados_lastras_novas
 
-# ─── BLOCO DE SEGURANÇA DE CAMINHOS ROBUSTO ───
-import sys
-from pathlib import Path
-raiz = Path(__file__).resolve().parents[2]
-if str(raiz) not in sys.path:
-    sys.path.append(str(raiz))
-# ──────────────────────────────────────────────
+st.set_page_config(page_title="Desempenho Lastras", page_icon="🎯", layout="wide")
 
-from src.core.data_loader import carregar_dados_lastras, carregar_dados_lastras_antigo
+st.markdown("<h1 style='text-align: center; color: #0F766E;'>🎯 Analisador de Complexidade e Mix de Formatos — Lastras</h1>", unsafe_allow_html=True)
+st.markdown("---")
 
-st.set_page_config(page_title="Desempenho Lastras", layout="wide")
+_, df_lastras = carregar_dados_lastras_novas()
 
-st.title("🎯 Dashboard de Desempenho Operacional Geral")
-st.write("Análise consolidada de produtividade e bipes gerados por cada turno.")
-
-# Carrega os dados usando a nova arquitetura unificada
-df_realizado, df_tec = carregar_dados_lastras_antigo()
-
-if df_realizado.empty:
-    st.error("❌ Erro ao carregar o histórico de bipes realizados dos turnos.")
-else:
-    # Sidebar de filtros específicos para esta página
-    st.sidebar.header("Filtros de Desempenho")
+if df_lastras is not None and not df_lastras.empty:
     
-    # Filtro de Turno Realizador
-    turnos_ids = sorted(df_realizado['TURNO_ID'].unique())
-    turno_sel = st.sidebar.multiselect("Filtrar Turno que Realizou", turnos_ids, default=turnos_ids)
+    # Tratamentos Estatísticos de Complexidade
+    df_lastras['RESTO_MAQUINA'] = df_lastras.apply(lambda r: int(r['120X270'] % 20) if r['tipo_unitizacao'] == 'CAIXOTE' else 0, axis=1)
+    df_lastras['RESTO_PAPELAO'] = df_lastras.apply(lambda r: int(r['160X160'] % 23) if r['tipo_unitizacao'] == 'CAIXOTE' else 0, axis=1)
+    df_lastras['TOTAL_FRACOES'] = df_lastras['RESTO_MAQUINA'] + df_lastras['RESTO_PAPELAO']
     
-    df_filtrado = df_realizado[df_realizado['TURNO_ID'].isin(turno_sel)]
-
-    # KPIs de Performance
-    st.markdown("### 🚀 Métricas de Execução dos Turnos")
-    m1, m2, m3 = st.columns(3)
+    st.subheader("📊 Diagnóstico Técnico de Esforço Invisível (Carteira Ativa)")
     
-    total_mi = df_filtrado['MI_VAL'].sum()
-    total_me = df_filtrado['ME_VAL'].sum()
-    total_gatilhos = df_filtrado['GATILHO'].sum()
+    # Mix de Formatos Global
+    tot_maquina = df_lastras['120X270'].sum()
+    tot_papelao = df_lastras['160X160'].sum()
+    tot_itens_acessos = df_lastras['qtd_itens'].sum()
+    tot_fracoes_un = df_lastras['TOTAL_FRACOES'].sum()
     
-    m1.metric("📥 Total MI (Mercado Interno)", f"{int(total_mi)} bipes")
-    m2.metric("🚢 Total ME (Mercado Externo)", f"{int(total_me)} bipes")
-    m3.metric("⚡ Total Acessos / Gatilhos", f"{int(total_gatilhos)} bipes")
-
-    # Gráfico de Linha / Evolução por data de referência
-    st.write("---")
-    st.markdown("### 📈 Tendência de Produtividade Diária por Turno")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Mix Formato Máquina", f"{int(tot_maquina)} pçs", "120x270 (Pesado)")
+    k2.metric("Mix Formato Papelão", f"{int(tot_papelao)} pçs", "160x160 (Leve)")
+    k3.metric("Fração Residual Gerada", f"{int(tot_fracoes_un)} peças soltas", "Esforço de Estoque")
+    k4.metric("Índice de Acessos/Hora", f"{int(tot_itens_acessos)} itens", "Grau de Complexidade")
     
-    df_linha = df_filtrado.groupby(['DATA_REF', 'TURNO_ID'])[['MI_VAL', 'ME_VAL']].sum().reset_index()
-    df_linha['TOTAL_BIPES'] = df_linha['MI_VAL'] + df_linha['ME_VAL']
+    st.markdown("<br>", unsafe_allow_html=True)
     
-    fig_linha = px.line(
-        df_linha,
-        x='DATA_REF',
-        y='TOTAL_BIPES',
-        color='TURNO_ID',
-        title="Evolução de Bipes Diários (MI + ME)",
-        labels={'DATA_REF': 'Data', 'TOTAL_BIPES': 'Volume Total', 'TURNO_ID': 'Turno'}
+    # Tabela Analítica de Perfis de Cubagem
+    st.subheader("📋 Auditoria de Cubagem e Esforço por Roteiro")
+    
+    df_lastras['MIX_MÁQUINA_%'] = ((df_lastras['120X270'] / df_lastras['TOTAL_GERAL'].replace(0, 1)) * 100).astype(int)
+    
+    st.dataframe(
+        df_lastras[['PERCURSO', 'CANAL', 'tipo_unitizacao', 'TOTAL_GERAL', 'MIX_MÁQUINA_%', 'TOTAL_FRACOES', 'qtd_itens', 'STATUS']].rename(columns={
+            'PERCURSO': 'Percurso', 'CANAL': 'Canal/Operação', 'tipo_unitizacao': 'Tipo Unitização',
+            'TOTAL_GERAL': 'Total Peças', 'MIX_MÁQUINA_%': '% Mix Máquina', 'TOTAL_FRACOES': 'Peças Fração',
+            'qtd_itens': 'Dificuldade (Itens)', 'STATUS': 'Status PCO'
+        }), use_container_width=True, hide_index=True
     )
-    st.plotly_chart(fig_linha, use_container_width=True)
-
-    # Tabela com ranking de percursos mais ativos
-    st.write("---")
-    st.markdown("### 🏆 Top Percursos com Maior Volume de Operação")
-    
-    df_ranking = df_filtrado.groupby('PERCURSO_LIMP')[['MI_VAL', 'ME_VAL', 'GATILHO']].sum().reset_index()
-    df_ranking['TOTAL'] = df_ranking['MI_VAL'] + df_ranking['ME_VAL']
-    df_ranking = df_ranking.sort_values(by='TOTAL', ascending=False).head(15)
-    
-    st.dataframe(df_ranking, use_container_width=True)
+else:
+    st.error("Nenhum dado integrado para gerar a matriz de Desempenho Lastras.")

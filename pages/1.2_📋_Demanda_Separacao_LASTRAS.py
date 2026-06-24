@@ -1,35 +1,62 @@
 import streamlit as st
+import pandas as pd
+from src.core.data_loader import carregar_dados_lastras_novas
 
-# ─── 1. CONFIGURAÇÃO DA PÁGINA ───
-st.set_page_config(
-    page_title="Módulo Lastras - Em Manutenção",
-    layout="wide"
-)
+st.set_page_config(page_title="Demanda Separação Lastras", page_icon="📋", layout="wide")
 
-# ─── 2. TRAVA DE SEGURANÇA GLOBAL (LOGIN) ───
-if "autenticado" not in st.session_state or not st.session_state["autenticado"]:
-    st.warning("⚠️ Por favor, faça o login na página inicial antes de acessar este módulo.")
-    st.stop()
-
-# ─── 3. TELA DE AVISO DE MANUTENÇÃO PROFISSIONAL ───
-st.title("🪵 Módulo: Demanda Separação — LASTRAS")
+st.markdown("<h1 style='text-align: center; color: #0F766E;'>📋 Carteira de Demanda e Fluxo de Lastras</h1>", unsafe_allow_html=True)
 st.markdown("---")
 
-# Caixa de Alerta Estilizada
-st.warning("### 🛠️ Módulo em Manutenção Técnica")
+# Carga do Motor de Dados Blindado v7.0
+_, df_lastras = carregar_dados_lastras_novas()
 
-st.markdown("""
-<div style="background-color: #fffbeb; border-left: 5px solid #d97706; padding: 20px; border-radius: 6px; margin-bottom: 25px; border-right: 1px solid #fef3c7; border-top: 1px solid #fef3c7; border-bottom: 1px solid #fef3c7;">
-    <h4 style="color: #b45309; margin-top: 0;">⚙️ Engenharia de Dados PCO em Andamento</h4>
-    <p style="color: #78350f;">Este módulo está passando por uma calibração nas regras de cubagem, parametrização de lastras e acoplamento com a esteira contínua.</p>
-    <hr style="border-top: 1px solid #fcd34d;">
-    <p style="font-size: 0.9rem; color: #78350f; margin-bottom: 0;">
-        👤 <b>Responsável Técnico:</b> Iarley (Planejamento / PCO)<br>
-        📅 <b>Previsão de Liberação:</b> Próxima Janela de Homologação
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-# Um loading visual discreto para dar a cara de sistema trabalhando no background
-with st.spinner("Sincronizando novas chaves de dados com as tabelas mestres..."):
-    st.info("💡 **Nota para a Operação:** Os demais módulos de Demanda (HT, ME, MI) e as telas de Capacidade continuam operando normalmente com dados em tempo real.")
+if df_lastras is not None and not df_lastras.empty:
+    
+    # KPIs de Cabeçalho (Filtro Global)
+    st.subheader("📌 Resumo Estratégico da Carteira")
+    m1, m2, m3, m4 = st.columns(4)
+    
+    total_percursos = df_lastras['PERCURSO'].nunique()
+    total_pecas = df_lastras['TOTAL_GERAL'].sum()
+    total_sequenciado = df_lastras[df_lastras['STATUS'] == 'SEQUENCIADO']['TOTAL_GERAL'].sum()
+    total_pendente = df_lastras[df_lastras['STATUS'] == 'NÃO SEQUENCIADO']['TOTAL_GERAL'].sum()
+    
+    m1.metric("Total de Percursos", f"{total_percursos} rotas")
+    m2.metric("Volume Total da Carteira", f"{int(total_pecas)} peças")
+    m3.metric("Volume Sequenciado (Garantido)", f"{int(total_sequenciado)} peças", delta=f"{int(total_sequenciado)} un")
+    m4.metric("Carteira Pendente (PCO)", f"{int(total_pendente)} peças", delta=f"-{int(total_pendente)} un" if total_pendente > 0 else "Zerado")
+    
+    st.markdown("---")
+    
+    # Divisão por Status de Atendimento
+    col_seq, col_nao_seq = st.columns(2)
+    
+    with col_seq:
+        st.markdown("### ✅ Percursos Sequenciados")
+        df_seq = df_lastras[df_lastras['STATUS'] == 'SEQUENCIADO']
+        if not df_seq.empty:
+            st.dataframe(
+                df_seq[['PERCURSO', 'CANAL', 'tipo_unitizacao', 'TOTAL_GERAL', 'TURNO_ALOCADO', 'MOTIVO']],
+                column_config={
+                    "PERCURSO": "Roteiro/Percurso", "CANAL": "Canal", "tipo_unitizacao": "Unitização",
+                    "TOTAL_GERAL": "Peças", "TURNO_ALOCADO": "Turno", "MOTIVO": "Prioridade"
+                }, use_container_width=True, hide_index=True
+            )
+        else:
+            st.info("Nenhuma carga sequenciada para este horizonte.")
+            
+    with col_nao_seq:
+        st.markdown("### ⏳ Carteira Não Sequenciada (Aguardando PCO)")
+        df_ns = df_lastras[df_lastras['STATUS'] == 'NÃO SEQUENCIADO']
+        if not df_ns.empty:
+            st.dataframe(
+                df_ns[['PERCURSO', 'CANAL', 'tipo_unitizacao', 'TOTAL_GERAL', 'MERCADO']],
+                column_config={
+                    "PERCURSO": "Roteiro/Percurso", "CANAL": "Canal", 
+                    "tipo_unitizacao": "Unitização", "TOTAL_GERAL": "Peças", "MERCADO": "Mkt"
+                }, use_container_width=True, hide_index=True
+            )
+        else:
+            st.success("Parabéns! Toda a carteira de lastras foi sequenciada pelo PCO. 🚀")
+else:
+    st.warning("Nenhum registro encontrado na aba Sequenciamento_Lastras.")

@@ -1,40 +1,49 @@
 import pandas as pd
 import streamlit as st
+import time
+
+# ==============================================================================
+# 🎯 MATRIZ DE CONEXÕES OFICIAIS (HOMOLOGADA - PCO PREMIUM 2026)
+# ==============================================================================
+
+# 1. Planilha: Demanda HT diária
+URL_HT_BASE      = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQUBeTkC4k0uKXOijcXRa1TJHPVW3QYKSieUVpLKDUq9oFYUa2Jtfq8BWEURZ9eoYWoPGppTtmIxI2c/pub?gid=1836411567&single=true&output=csv"
+URL_HT_ATT       = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQUBeTkC4k0uKXOijcXRa1TJHPVW3QYKSieUVpLKDUq9oFYUa2Jtfq8BWEURZ9eoYWoPGppTtmIxI2c/pub?gid=1318835351&single=true&output=csv"
+URL_HT_REALIZADO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQUBeTkC4k0uKXOijcXRa1TJHPVW3QYKSieUVpLKDUq9oFYUa2Jtfq8BWEURZ9eoYWoPGppTtmIxI2c/pub?gid=1740948393&single=true&output=csv"
+
+# 2. Planilha: Sequenciamento_previsão carregamento
+URL_UNIFICADA_MI_ME = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=952730620&single=true&output=csv"
+URL_LASTRAS_NOVAS   = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=363154865&single=true&output=csv"
+
+# 3. Planilha: PRODUTIVIDADE TURNO POR ACESSO MI e ME
+URL_BIPES_TURNOS = {
+    "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
+    "TURNO 2": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1250180014&single=true&output=csv",
+    "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
+}
 
 def carregar_e_tratar_dados():
-    """
-    [MÓDULO: DEMANDA HT]
-    Conecta à planilha original de demandas HT e lê de forma híbrida (Nome + Posição)
-    para evitar o conflito de colunas com o mesmo nome (como K e P).
-    """
-    ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    url_base = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1836411567"
-    url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1318835351"
-    
+    """ [MÓDULO: DEMANDA HT] """
     try:
-        df_att = pd.read_csv(url_atualizacao, header=None)
+        df_att = pd.read_csv(URL_HT_ATT, header=None)
         data_atualizacao = str(df_att.iloc[1, 0]).strip() if len(df_att) > 1 else "Não informada"
     except Exception:
         data_atualizacao = "Erro na leitura"
 
     try:
-        df = pd.read_csv(url_base)
+        df = pd.read_csv(URL_HT_BASE)
         if df.empty: return None, data_atualizacao
         
-        # Remove espaços das pontas dos cabeçalhos
         df.columns = df.columns.str.strip()
         df_real = pd.DataFrame()
         
-        # 🛡️ RESTAURAÇÃO COMPATIBILIDADE HT: Mapeamento seguro para colunas duplicadas
         df_real['Tipo'] = df['Tipo'] if 'Tipo' in df.columns else "Carga"
-        df_real['Status'] = df.iloc[:, 1]  # Força a segunda coluna física (Coluna B)
-        df_real['Fatura'] = df.iloc[:, 8]  # Força a 9ª coluna física (Coluna I)
-        df_real['Percurso'] = df.iloc[:, 9] # Força a 10ª coluna física (Coluna J)
-        
-        # 🎯 Alvo corrigido: Puxa exatamente a coluna P (16ª coluna, índice 15) evitando o espelhamento da K
+        df_real['Status'] = df.iloc[:, 1]
+        df_real['Fatura'] = df.iloc[:, 8]
+        df_real['Percurso'] = df.iloc[:, 9]
         df_real['Total_Plt_Percurso'] = df.iloc[:, 15] 
-        df_real['Data_Carregamento'] = df.iloc[:, 16]  # Coluna Q (índice 16)
-        df_real['Modal'] = df.iloc[:, 17]             # Coluna R (índice 17)
+        df_real['Data_Carregamento'] = df.iloc[:, 16]
+        df_real['Modal'] = df.iloc[:, 17]
         
         df_real = df_real.dropna(subset=['Fatura', 'Percurso'], how='all')
         df_real['Data_Carregamento'] = pd.to_datetime(df_real['Data_Carregamento'], errors='coerce')
@@ -43,33 +52,33 @@ def carregar_e_tratar_dados():
         return None, "Erro"
 
 
+@st.cache_data(ttl=30)
 def carregar_dados_separacao():
-    """
-    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - ME - REDIRECIONADO V6.0]
-    Regra estrita ditada pelo PCO: O Python lê a aba unificada de faturamento (Gid 1410794624), 
-    mas filtra ÚNICA E EXCLUSIVAMENTE as linhas cujo CANAL é 'Direct Sale' (Faturamento ME).
-    """
-    # 🔒 MUDANÇA DE ALVO APONTADA PARA A NOVA ABA UNIFICADA CORRETA (Gid 1410794624)
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
-    
-    ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"
-    
+    """ [MÓDULO: MERCADO EXTERNO (ME)] """
     try:
-        df_att = pd.read_csv(url_atualizacao, header=None)
+        df_att = pd.read_csv(URL_HT_ATT, header=None)
         dt_a3_str = str(df_att.iloc[2, 0]).strip() if len(df_att) > 2 else "Não informada"
         data_corte_separacao = pd.to_datetime(dt_a3_str.split()[0], dayfirst=True, errors='coerce')
-        if pd.isna(data_corte_separacao):
-            data_corte_separacao = pd.to_datetime(pd.Timestamp.now().date())
     except Exception:
         data_corte_separacao = pd.to_datetime(pd.Timestamp.now().date())
         dt_a3_str = "Usando data do sistema"
 
+    df = None
+    for tentativa in range(3):
+        try:
+            df = pd.read_csv(URL_UNIFICADA_MI_ME)
+            break
+        except Exception as e:
+            if tentativa < 2:
+                time.sleep(1)
+                continue
+            else:
+                st.error(f"🚨 ERRO DE CONEXÃO GOOGLE (Tentativas Esgotadas ME): {e}")
+                return None, data_corte_separacao, dt_a3_str
+
     try:
-        df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # 🛡️ ISOLAMENTO EXCLUSIVO DO MERCADO EXTERNO (ME) VIA CANAL DE CONTRATO
         if 'CANAL' in df.columns:
             df = df[df['CANAL'].astype(str).str.strip() == 'Direct Sale']
         else:
@@ -79,174 +88,100 @@ def carregar_dados_separacao():
                 return pd.DataFrame(columns=['PERCURSO', 'STATUS', 'VOLUME_TOTAL', 'TURNO_ALOCADO']), data_corte_separacao, dt_a3_str
 
         df_real = pd.DataFrame()
-        
         if 'PERCURSO' in df.columns:
             df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
         else:
-            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha unificada.")
+            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada.")
             return None, data_corte_separacao, dt_a3_str
 
         if 'STATUS' in df.columns:
             df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
-        else:
-            st.error("🚨 ERRO CRÍTICO: O Python exige a coluna 'STATUS' para validar a demanda.")
-            return None, data_corte_separacao, dt_a3_str
         
         if 'Data 1º Firme' in df.columns:
             df_real['DT_1_FIRME'] = pd.to_datetime(df['Data 1º Firme'], dayfirst=True, errors='coerce')
         else:
             df_real['DT_1_FIRME'] = pd.to_datetime(df.iloc[:, 2], dayfirst=True, errors='coerce')
             
-        if 'DT PERCURSO' in df.columns:
-            df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], dayfirst=True, errors='coerce')
-        else:
-            df_real['DT_PERCURSO'] = df_real['DT_1_FIRME']
+        df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], dayfirst=True, errors='coerce') if 'DT PERCURSO' in df.columns else df_real['DT_1_FIRME']
+        df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce') if 'DATA SEQUENCIADO' in df.columns else df_real['DT_1_FIRME']
         
-        if 'DATA SEQUENCIADO' in df.columns:
-            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
-        elif 'PROGRAMADO' in df.columns:
-            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], dayfirst=True, errors='coerce')
-        else:
-            df_real['DT_SEQUENCIADO'] = df_real['DT_1_FIRME']
-        
-        cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0) if 'CXS' in df.columns else 0
-        pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0) if 'PLS' in df.columns else 0
+        cxs = pd.to_numeric(df['CXS'], errors='coerce').fillna(0)
+        pls = pd.to_numeric(df['PLS'], errors='coerce').fillna(0)
         df_real['VOLUME_TOTAL'] = (cxs + pls).astype(int)
         
         if 'TURNO_REAL' in df.columns:
-            col_turno_alocado = 'TURNO_REAL'
-        elif 'TURNO' in df.columns:
-            col_turno_alocado = 'TURNO'
-        else:
-            col_turno_alocado = None
-            
-        if col_turno_alocado:
-            df_real['TURNO_ALOCADO'] = pd.to_numeric(df[col_turno_alocado], errors='coerce').fillna(1.0).astype(str).str.strip()
+            df_real['TURNO_ALOCADO'] = pd.to_numeric(df['TURNO_REAL'], errors='coerce').fillna(1.0).astype(str).str.strip()
             df_real['TURNO_ALOCADO'] = df_real['TURNO_ALOCADO'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
         else:
             df_real['TURNO_ALOCADO'] = "1.0"
         
         df_real = df_real.dropna(subset=['PERCURSO'])
-        df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
-
-        df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
-        df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
-        df_real = df_real.drop_duplicates(subset=['PERCURSO'], keep='first').drop(columns=['prioridade_status'])
-        
-        return df_real, data_corte_separacao, dt_a3_str
+        return df_real.drop_duplicates(subset=['PERCURSO'], keep='first'), data_corte_separacao, dt_a3_str
     except Exception as e:
-        st.error(f"Erro no mapeamento unificado focado na coluna STATUS (ME): {e}")
+        st.error(f"Erro no mapeamento STATUS (ME): {e}")
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
+@st.cache_data(ttl=30)
 def carregar_dados_separacao_mi():
-    """
-    [MÓDULO: DEMANDA SEPARAÇÃO COMPATIBILIDADE - MI - NOVO V6.0]
-    Conecta à aba unificada 'Sequenciamento_MI' (Gid 1410794624) e filtra fora as linhas do ME (Direct Sale).
-    """
-    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
-    
-    ID_PLANILHA_ATT = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    url_atualizacao = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA_ATT}/export?format=csv&gid=1318835351"
-    
+    """ [MÓDULO: MERCADO INTERNO (MI)] """
     try:
-        df_att = pd.read_csv(url_atualizacao, header=None)
+        df_att = pd.read_csv(URL_HT_ATT, header=None)
         dt_a3_str = str(df_att.iloc[2, 0]).strip() if len(df_att) > 2 else "Não informada"
         data_corte_separacao = pd.to_datetime(dt_a3_str.split()[0], dayfirst=True, errors='coerce')
-        if pd.isna(data_corte_separacao):
-            data_corte_separacao = pd.to_datetime(pd.Timestamp.now().date())
     except Exception:
         data_corte_separacao = pd.to_datetime(pd.Timestamp.now().date())
         dt_a3_str = "Usando data do sistema"
 
+    df = None
+    for tentativa in range(3):
+        try:
+            df = pd.read_csv(URL_UNIFICADA_MI_ME)
+            break
+        except Exception as e:
+            if tentativa < 2:
+                time.sleep(1)
+                continue
+            else:
+                st.error(f"🚨 ERRO DE CONEXÃO GOOGLE (Tentativas Esgotadas MI): {e}")
+                return None, data_corte_separacao, dt_a3_str
+
     try:
-        df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # 🛡️ FILTRA REQUISITO MI: Remove da tela tudo o que for Direct Sale (ME)
         if 'CANAL' in df.columns:
             df = df[df['CANAL'].astype(str).str.strip() != 'Direct Sale']
-        else:
-            if 'MERCADO' in df.columns:
-                df = df[df['MERCADO'].astype(str).str.strip().str.upper() != 'ME']
 
         df_real = pd.DataFrame()
+        df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
+        df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
+        df_real['CANAL'] = df['CANAL'].astype(str).str.strip() if 'CANAL' in df.columns else "Não Informado"
         
-        if 'PERCURSO' in df.columns:
-            df_real['PERCURSO'] = df['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
-        else:
-            st.error("🚨 ERRO CRÍTICO: Coluna 'PERCURSO' não encontrada na planilha de MI.")
-            return None, data_corte_separacao, dt_a3_str
-
-        if 'STATUS' in df.columns:
-            df_real['STATUS'] = df['STATUS'].astype(str).str.strip().str.upper()
-        else:
-            st.error("🚨 ERRO CRÍTICO: Coluna 'STATUS' exigida não encontrada no MI.")
-            return None, data_corte_separacao, dt_a3_str
-        
-        if 'CANAL' in df.columns:
-            df_real['CANAL'] = df['CANAL'].astype(str).str.strip()
-        else:
-            df_real['CANAL'] = "Não Informado"
-        
-        if 'Data 1º Firme' in df.columns:
-            df_real['DT_1_FIRME'] = pd.to_datetime(df['Data 1º Firme'], dayfirst=True, errors='coerce')
-        else:
-            df_real['DT_1_FIRME'] = pd.to_datetime(df.iloc[:, 2], dayfirst=True, errors='coerce')
-            
-        if 'DT PERCURSO' in df.columns:
-            df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], dayfirst=True, errors='coerce')
-        else:
-            df_real['DT_PERCURSO'] = df_real['DT_1_FIRME']
-        
-        if 'DATA SEQUENCIADO' in df.columns:
-            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
-        elif 'PROGRAMADO' in df.columns:
-            df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['PROGRAMADO'], dayfirst=True, errors='coerce')
-        else:
-            df_real['DT_SEQUENCIADO'] = df_real['DT_1_FIRME']
+        df_real['DT_1_FIRME'] = pd.to_datetime(df['Data 1º Firme'], dayfirst=True, errors='coerce') if 'Data 1º Firme' in df.columns else pd.to_datetime(df.iloc[:, 2], dayfirst=True, errors='coerce')
+        df_real['DT_PERCURSO'] = pd.to_datetime(df['DT PERCURSO'], dayfirst=True, errors='coerce') if 'DT PERCURSO' in df.columns else df_real['DT_1_FIRME']
+        df_real['DT_SEQUENCIADO'] = pd.to_datetime(df['DATA SEQUENCIADO'], dayfirst=True, errors='coerce') if 'DATA SEQUENCIADO' in df.columns else df_real['DT_1_FIRME']
         
         df_real['CXS'] = pd.to_numeric(df['CXS'], errors='coerce').fillna(0).astype(int)
         df_real['PLS'] = pd.to_numeric(df['PLS'], errors='coerce').fillna(0).astype(int)
         df_real['VOLUME_TOTAL'] = df_real['CXS'] + df_real['PLS']
         
         if 'TURNO_REAL' in df.columns:
-            col_turno_alocado = 'TURNO_REAL'
-        elif 'TURNO' in df.columns:
-            col_turno_alocado = 'TURNO'
-        else:
-            col_turno_alocado = None
-            
-        if col_turno_alocado:
-            df_real['TURNO_ALOCADO'] = pd.to_numeric(df[col_turno_alocado], errors='coerce').fillna(1.0).astype(str).str.strip()
+            df_real['TURNO_ALOCADO'] = pd.to_numeric(df['TURNO_REAL'], errors='coerce').fillna(1.0).astype(str).str.strip()
             df_real['TURNO_ALOCADO'] = df_real['TURNO_ALOCADO'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
         else:
             df_real['TURNO_ALOCADO'] = "1.0"
         
         df_real = df_real.dropna(subset=['PERCURSO'])
-        df_real = df_real[(df_real['PERCURSO'] != 'nan') & (df_real['PERCURSO'] != '')]
-
-        df_real['prioridade_status'] = df_real['STATUS'].apply(lambda x: 2 if x == 'SEQUENCIADO' else 1)
-        df_real = df_real.sort_values(by=['PERCURSO', 'prioridade_status'], ascending=[True, False])
-        df_real = df_real.drop_duplicates(subset=['PERCURSO'], keep='first').drop(columns=['prioridade_status'])
-        
-        return df_real, data_corte_separacao, dt_a3_str
+        return df_real.drop_duplicates(subset=['PERCURSO'], keep='first'), data_corte_separacao, dt_a3_str
     except Exception as e:
-        st.error(f"Erro no mapeamento unificado focado na coluna STATUS (MI): {e}")
+        st.error(f"Erro no mapeamento STATUS (MI): {e}")
         return None, pd.to_datetime(pd.Timestamp.now().date()), "Erro"
 
 
 def carregar_execucao_turnos():
-    """
-    [MÓDULO: DEMANDA SEPARAÇÃO]
-    Carrega os turnos limpando e normalizando os cabeçalhos para garantir o MATCH do Percurso Puro.
-    """
-    ID_PUB_TURNOS = "2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw"
-    GIDS = {"TURNO 1": "0", "TURNO 2": "1250180014", "TURNO 3": "1415290687"}
+    """ [MÓDULO: BIPES DOS TURNOS] """
     df_consolidado = []
-    
-    for turno, gid in GIDS.items():
-        url = f"https://docs.google.com/spreadsheets/d/e/{ID_PUB_TURNOS}/pub?output=csv&gid={gid}"
+    for turno, url in URL_BIPES_TURNOS.items():
         try:
             df = pd.read_csv(url)
             if not df.empty:
@@ -267,22 +202,12 @@ def carregar_execucao_turnos():
 
 
 def carregar_realizado_ht(ano_selecionado="2026"):
-    """
-    [MÓDULO: REALIZADO HT]
-    Carrega a aba de tratamentos realizados sem perda de linhas por falha de tipo.
-    """
-    ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    GIDS_ANOS = {"2026": "1740948393", "2027": "1740948393"}
-    
-    gid = GIDS_ANOS.get(ano_selecionado, "1740948393")
-    url = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid={gid}"
-    
+    """ [MÓDULO: REALIZADO HT] """
     try:
-        df = pd.read_csv(url, dtype=str)
+        df = pd.read_csv(URL_HT_REALIZADO, dtype=str)
         if df.empty: return None
         
         df.columns = df.columns.str.strip()
-        
         df_realizado = pd.DataFrame()
         df_realizado['CONCAT'] = df['CONCAT'].fillna('').astype(str).str.strip()
         df_realizado['TURNO'] = df['Tur. Início'].fillna('').astype(str).str.strip().str.upper()
@@ -291,152 +216,79 @@ def carregar_realizado_ht(ano_selecionado="2026"):
         
         txt_data_original = df['data produção ini'].fillna('').astype(str).str.strip()
         df_realizado['DATA_PROD'] = pd.to_datetime(txt_data_original, format='mixed', errors='coerce')
+        df_realizado['NUM_MES'] = df_realizado['DATA_PROD'].dt.month.fillna(6).astype(int)
         
-        def processar_mes_linha(row):
-            if pd.notna(row['DATA_PROD']):
-                return row['DATA_PROD'].month
-            
-            idx = row.name
-            string_data = txt_data_original.iloc[idx] if idx < len(txt_data_original) else ""
-            partes = string_data.split('/')
-            if len(partes) >= 2:
-                try: return int(partes[1])
-                except: pass
-            return 6
-            
-        df_realizado['NUM_MES'] = df_realizado.apply(processar_mes_linha, axis=1)
-        df_realizado['DATA_PROD'] = df_realizado['DATA_PROD'].fillna(pd.Timestamp.normalize(pd.Timestamp.now()))
         df_realizado = df_realizado[df_realizado['CONCAT'] != '']
-        df_realizado = df_realizado[df_realizado['CONCAT'] != 'nan']
-        
-        def classificar_tipo(percurso_str):
-            if percurso_str.isdigit() and percurso_str != '':
-                return "CARGA"
-            return "ESTRADO"
-            
-        df_realizado['TIPO_FLUXO'] = df_realizado['PERCURSO_RAW'].apply(classificar_tipo)
+        df_realizado['TIPO_FLUXO'] = df_realizado['PERCURSO_RAW'].apply(lambda x: "CARGA" if x.isdigit() else "ESTRADO")
         return df_realizado
     except Exception as e:
-        st.error(f"Erro crítico no motor data_loader (Módulo 5): {e}")
+        st.error(f"Erro crítico no motor realizado HT: {e}")
         return None
 
 
 def carregar_faturamento_ht(ano_selecionado="2026"):
-    """
-    [MÓDULO: FATURAMENTO HT — COMPATIBILIDADE ISOLADA]
-    Conecta de forma dedicada à mesma base técnica do HT para suprir a demanda da tela 3.1.
-    """
-    ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    GIDS_ANOS = {"2026": "1740948393", "2027": "1740948393"}
-    
-    gid = GIDS_ANOS.get(ano_selecionado, "1740948393")
-    url = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid={gid}"
-    
+    """ [MÓDULO: FATURAMENTO HT] """
     try:
-        df = pd.read_csv(url, dtype=str)
+        df = pd.read_csv(URL_HT_REALIZADO, dtype=str)
         if df.empty: return None
-        
         df.columns = df.columns.str.strip()
-        df_fat = pd.DataFrame()
-        
-        if 'CONCAT' in df.columns:
-            df_fat['CONCAT'] = df['CONCAT'].fillna('').astype(str).str.strip()
-        if 'Pallets' in df.columns:
-            df_fat['PALLETS'] = pd.to_numeric(df['Pallets'], errors='coerce').fillna(0).astype(int)
-            
         return df
     except Exception:
         return None
 
 
 def carregar_dados_lastras_novas():
-    """
-    [MÓDULO: LASTRAS & SEPARAÇÃO UNIFICADA]
-    Puxa a matriz de lastras apontando para a aba unificada de faturamento (Gid 1410794624).
-    """
-    url_bipes = {
-        "TURNO 1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=0&single=true&output=csv",
-        "TURNO 2": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1250180014&single=true&output=csv",
-        "TURNO 3": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTS8d44ajH4_Hm7uaAWVbejIzmbMqK8fCbYEPYWddDc4pnbFBhyOye4vs6QmtJ-a51V-b9HDTFPDcSw/pub?gid=1415290687&single=true&output=csv"
-    }
-    
-    URL_NOVA_LASTRA = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSqUnWPArdoAcBGkShJALYLN7SzmXeKbus_mzDiT9iP3B3iHEEfRdm1LEVSKEllLLnjgcgX8Lajn7k-/pub?gid=1410794624&single=true&output=csv"
-    
-    lista_turnos = []
-    for t_nome in ["TURNO 1", "TURNO 2", "TURNO 3"]:
-        try:
-            df = pd.read_csv(url_bipes[t_nome])
-            df.columns = [str(c).strip().upper() for c in df.columns]
-            data_col = next(c for c in df.columns if "DATA" in c)
-            df['DATA_REF'] = pd.to_datetime(df[data_col], dayfirst=True, errors='coerce')
-            df['TURNO_ID'] = t_nome.split()[-1]
-            per_col = next(c for c in df.columns if "PERCURSO" in c)
-            df['PERCURSO_LIMP'] = df[per_col].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-            
-            c_mi = next((c for c in df.columns if "MI" in c and "TOTAL" in c), None)
-            c_me = next((c for c in df.columns if "ME" in c and "TOTAL" in c), None)
-            c_gat = next((c for c in df.columns if "LASTRA" in c and "ACESSOS" in c), None)
-            
-            df['MI_VAL'] = pd.to_numeric(df[c_mi], errors='coerce').fillna(0) if c_mi else 0
-            df['ME_VAL'] = pd.to_numeric(df[c_me], errors='coerce').fillna(0) if c_me else 0
-            df['GATILHO'] = pd.to_numeric(df[c_gat], errors='coerce').fillna(0) if c_gat else 0
-            
-            lista_turnos.append(df[['DATA_REF', 'TURNO_ID', 'PERCURSO_LIMP', 'GATILHO', 'MI_VAL', 'ME_VAL']])
-        except Exception:
-            continue
-        
-    df_realizado = pd.concat(lista_turnos, ignore_index=True).dropna(subset=['DATA_REF'])
+    """ [MÓDULO: SEQUENCIAMENTO DE LASTRAS - V7.2] """
+    df_realizado = carregar_execucao_turnos()
 
     try:
-        df_tec = pd.read_csv(URL_NOVA_LASTRA)
+        df_tec = pd.read_csv(URL_LASTRAS_NOVAS)
         df_tec.columns = [str(c).strip() for c in df_tec.columns]
         
-        if 'DATA SEQUENCIADO' in df_tec.columns:
-            df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['DATA SEQUENCIADO'], dayfirst=True, errors='coerce')
-        elif 'PROGRAMADO' in df_tec.columns:
-            df_tec['DATA_SEQ'] = pd.to_datetime(df_tec['PROGRAMADO'], errors='coerce')
+        df_real_lastras = pd.DataFrame()
+        if 'Percurso' in df_tec.columns:
+            df_real_lastras['PERCURSO'] = df_tec['Percurso'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         else:
-            df_tec['DATA_SEQ'] = pd.NaT
-            
-        df_tec['PERCURSO_CHAVE'] = df_tec['PERCURSO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            return df_realizado, pd.DataFrame()
+
+        df_real_lastras['STATUS'] = df_tec['STATUS'].astype(str).str.strip().str.upper() if 'STATUS' in df_tec.columns else "NÃO SEQUENCIADO"
+        df_real_lastras['CANAL'] = df_tec['CANAL'].astype(str).str.strip() if 'CANAL' in df_tec.columns else "Não Informado"
+        df_real_lastras['tipo_unitizacao'] = df_tec['tipo_unitizacao'].astype(str).str.strip().str.upper() if 'tipo_unitizacao' in df_tec.columns else "NÃO INFORMADO"
+        df_real_lastras['MOTIVO'] = df_tec['MOTIVO'].astype(str).str.strip() if 'MOTIVO' in df_tec.columns else ""
+        df_real_lastras['MERCADO'] = df_tec['MERCADO'].astype(str).str.strip().str.upper() if 'MERCADO' in df_tec.columns else "LASTRA"
+        df_real_lastras['qtd_itens'] = pd.to_numeric(df_tec['qtd_itens'], errors='coerce').fillna(0).astype(int)
+
+        f_maquina = pd.to_numeric(df_tec['120X270'], errors='coerce').fillna(0).astype(int)
+        f_papelao = pd.to_numeric(df_tec['160X160'], errors='coerce').fillna(0).astype(int)
         
+        df_real_lastras['120X270'] = f_maquina
+        df_real_lastras['160X160'] = f_papelao
+        df_real_lastras['TOTAL_GERAL'] = f_maquina + f_papelao
+
+        df_real_lastras['DT_PERCURSO'] = pd.to_datetime(df_tec['DT PERCURSO'], dayfirst=True, errors='coerce') if 'DT PERCURSO' in df_tec.columns else pd.NaT
+        df_real_lastras['DT_SEQUENCIADO'] = pd.to_datetime(df_tec['DATA SEQUENCIADO'], dayfirst=True, errors='coerce') if 'DATA SEQUENCIADO' in df_tec.columns else df_real_lastras['DT_PERCURSO']
+
+        for t_base in ['BASE T1', 'BASE T2', 'BASE T3']:
+            df_real_lastras[t_base.replace(' ', '_')] = pd.to_numeric(df_tec[t_base], errors='coerce').fillna(0).astype(int) if t_base in df_tec.columns else 0
+
         if 'TURNO_REAL' in df_tec.columns:
-            col_turno_t = 'TURNO_REAL'
-        elif 'TURNO' in df_tec.columns:
-            col_turno_t = 'TURNO'
+            df_real_lastras['TURNO_ALOCADO'] = pd.to_numeric(df_tec['TURNO_REAL'], errors='coerce').fillna(1.0).astype(str).str.strip()
+            df_real_lastras['TURNO_ALOCADO'] = df_real_lastras['TURNO_ALOCADO'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
         else:
-            col_turno_t = None
-            
-        if col_turno_t:
-            df_tec['TURNO_CHAVE'] = pd.to_numeric(df_tec[col_turno_t], errors='coerce').fillna(1.0).astype(str).str.strip()
-            df_tec['TURNO_CHAVE'] = df_tec['TURNO_CHAVE'].apply(lambda x: f"{float(x):.1f}" if x != 'nan' and x != '' else "1.0")
-        else:
-            df_tec['TURNO_CHAVE'] = "1.0"
-        
-        for col in ['120X270', '160 X 160', 'PC', 'M2', 'PESO BRUTO']:
-            if col in df_tec.columns:
-                df_tec[col] = pd.to_numeric(df_tec[col], errors='coerce').fillna(0)
-            else:
-                df_tec[col] = 0
-        return df_realizado, df_tec
+            df_real_lastras['TURNO_ALOCADO'] = "1.0"
+
+        df_real_lastras = df_real_lastras.dropna(subset=['PERCURSO'])
+        return df_realizado, df_real_lastras
     except Exception as e:
-        st.error(f"Erro ao mapear a nova aba de Sequenciamento v1: {e}")
+        st.error(f"Erro na aba de Lastras v7.2: {e}")
         return df_realizado, pd.DataFrame()
 
 
 def carregar_matriz_capacidade():
-    """
-    [MÓDULO: PARAMETRIZAÇÃO DINÂMICA]
-    Carrega a matriz mestre de restrições diretamente da aba 'atualização' (Gid 1318835351).
-    Retorna o DataFrame bruto e um dicionário mapeado para consultas rápidas.
-    """
-    ID_PLANILHA = "1BYnAn1HYGkrJgCC-L0TCKVepLt3do6zqCPJvYhzcq_Y"
-    url_matriz = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1318835351"
-    
+    """ [MÓDULO: PARAMETRIZAÇÃO DINÂMICA] """
     try:
-        df = pd.read_csv(url_matriz)
-        if df.empty:
-            return None, {}
+        df = pd.read_csv(URL_HT_ATT)
+        if df.empty: return None, {}
         
         df.columns = df.columns.str.strip()
         for col in ['ATIVIDADE', 'METRICA_NOME', 'SUB_DIVISAO']:
@@ -446,16 +298,11 @@ def carregar_matriz_capacidade():
         def definir_valor_atual(row):
             override = str(row['OVERRIDE_VALOR']).strip()
             if override and override != 'nan' and override != '':
-                try:
-                    return float(override) if '.' in override or override == '0.75' else int(float(override))
-                except:
-                    return override
-            
+                try: return float(override) if '.' in override or override == '0.75' else int(float(override))
+                except: return override
             val_padrao = row['VALOR_PADRAO']
-            try:
-                return float(val_padrao) if int(val_padrao) != float(val_padrao) else int(val_padrao)
-            except:
-                return val_padrao
+            try: return float(val_padrao) if int(val_padrao) != float(val_padrao) else int(val_padrao)
+            except: return val_padrao
 
         df['VALOR_REAL'] = df.apply(definir_valor_atual, axis=1)
         
