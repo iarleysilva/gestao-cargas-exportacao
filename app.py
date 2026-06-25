@@ -108,7 +108,7 @@ if opcao == "🏠 Home - Visão Executiva":
     st.markdown(f"""
     <div class='welcome-box'>
         <h3>Sincronização Integrada de Cargas Comercial</h3>
-        <p>Olá, <b>{st.session_state['usuario_logado']}</b>! O ecossistema está ativo, estável e pronto. Utilize o menu lateral esquerdo para navegar entre as telas operacionais sem risco de travamento.</p>
+        <p>Olá, <b>{st.session_state['usuario_logado']}</b>! O ecossistema está ativo, estável e pronto. Utilize o menu lateral esquerdo para navegar entre as telas operacionais.</p>
     </div>
     """, unsafe_allow_html=True)
 
