@@ -94,13 +94,23 @@ if df is not None:
         total_plts_geral = int(df_validos['Total_Plt_Percurso'].sum())
         cargas_geral = len(df_validos)
         
+        # 🚢 QUEBRA ANALÍTICA DE MODAIS POR PERÍODO
+        m_hoje_mari = len(df_hoje[df_hoje['Modal'].str.contains('Marítimo', case=False, na=False)])
+        m_hoje_rodo = len(df_hoje[df_hoje['Modal'].str.contains('Rodoviário', case=False, na=False)])
+
+        m_amanha_mari = len(df_amanha[df_amanha['Modal'].str.contains('Marítimo', case=False, na=False)])
+        m_amanha_rodo = len(df_amanha[df_amanha['Modal'].str.contains('Rodoviário', case=False, na=False)])
+
+        m_geral_mari = len(df_validos[df_validos['Modal'].str.contains('Marítimo', case=False, na=False)])
+        m_geral_rodo = len(df_validos[df_validos['Modal'].str.contains('Rodoviário', case=False, na=False)])
+        
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(estilo_card_topo.format(cor="#dc3545", titulo="🚨 Programado para Hoje", valor=f"{total_plts_hoje} Plts", subtitulo=f"{len(df_hoje)} cargas para {hoje.strftime('%d/%m')}"), unsafe_allow_html=True)
+            st.markdown(estilo_card_topo.format(cor="#dc3545", titulo="🚨 Programado para Hoje", valor=f"{total_plts_hoje} Plts", subtitulo=f"🚢 Marítimo: {m_hoje_mari} | 🚚 Rodo: {m_hoje_rodo} ({len(df_hoje)} cargas)"), unsafe_allow_html=True)
         with c2:
-            st.markdown(estilo_card_topo.format(cor="#ffc107", titulo="📅 Programado para Amanhã", valor=f"{total_plts_amanha} Plts", subtitulo=f"{len(df_amanha)} cargas para {amanha.strftime('%d/%m')}"), unsafe_allow_html=True)
+            st.markdown(estilo_card_topo.format(cor="#ffc107", titulo="📅 Programado para Amanhã", valor=f"{total_plts_amanha} Plts", subtitulo=f"🚢 Marítimo: {m_amanha_mari} | 🚚 Rodo: {m_amanha_rodo} ({len(df_amanha)} cargas)"), unsafe_allow_html=True)
         with c3:
-            st.markdown(estilo_card_topo.format(cor="#6c757d", titulo="📊 Total Geral em Aberto", valor=f"{total_plts_geral} Plts", subtitulo=f"{cargas_geral} cargas programadas no total"), unsafe_allow_html=True)
+            st.markdown(estilo_card_topo.format(cor="#6c757d", titulo="📊 Total Geral em Aberto", valor=f"{total_plts_geral} Plts", subtitulo=f"🚢 Marítimo: {m_geral_mari} | 🚚 Rodo: {m_geral_rodo} ({cargas_geral} cargas)"), unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -121,113 +131,135 @@ if df is not None:
         rend_t3 = tracking_pco.get(('HT', '3', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '3.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
         estimativa_t3 = ciclos_t3 * rend_t3
         
-        # Puxa o realizado consolidado na aba do Sheets
-        df_real_hoje = df_realizado_ht[df_realizado_ht['DATA_PROD'].dt.date == hoje_br] if df_realizado_ht is not None else pd.DataFrame()
-        t1_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('I$|1', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
-        t2_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('II$|2', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
-        t3_confirmado = df_real_hoje[df_real_hoje['TURNO'].astype(str).str.contains('III$|3', na=False)]['PALLETS'].sum() if not df_real_hoje.empty else 0
+        # 🛡️ FIX DO RECONHECIMENTO DE TURNOS (DADO CONECTADO COM A PERFORMANCE 3.1)
+        # Isola estritamente as strings de turnos com tratamento anti-espaço para não misturar os dados
+        df_real_hoje = df_realizado_ht[df_realizado_ht['DATA_PROD'].dt.date == hoje_br].copy() if df_realizado_ht is not None else pd.DataFrame()
+        if not df_real_hoje.empty:
+            df_real_hoje['TURNO_LIMPO'] = df_real_hoje['TURNO'].astype(str).str.replace(" ", "", regex=False).str.upper()
+            t1_confirmado = df_real_hoje[df_real_hoje['TURNO_LIMPO'] == "TURNOI"]['PALLETS'].sum()
+            t2_confirmado = df_real_hoje[df_real_hoje['TURNO_LIMPO'] == "TURNOII"]['PALLETS'].sum()
+            t3_confirmado = df_real_hoje[df_real_hoje['TURNO_LIMPO'] == "TURNOIII"]['PALLETS'].sum()
+        else:
+            t1_confirmado, t2_confirmado, t3_confirmado = 0, 0, 0
         
         dia_semana_hoje = hoje_br.weekday()
 
         # Inicialização das variáveis operacionais
         status_t1_txt, status_t2_txt, status_t3_txt = "Aguardando", "Aguardando", "Aguardando"
         cor_t1, cor_t2, cor_t3 = "#64748b", "#64748b", "#64748b"
-        carga_real_t1, carga_real_t2, carga_real_t3 = estimativa_t1, estimativa_t2, estimativa_t3
+        carga_real_t1, carga_real_t2, carga_real_t3 = 0, 0, 0
+
+        # 🧠 FUNÇÃO OPERACIONAL INTERNA DE CÁLCULO E ANÁLISE DE RAIO-X DE METAS COM JUSTIFICATIVAS
+        def analisar_SLA_e_mix_hoje(real, planejado, turno_tag):
+            if planejado <= 0:
+                return ""
+            perf_pct = ((real / planejado) - 1) * 100
+            
+            df_bipes_turno = df_real_hoje[df_real_hoje['TURNO_LIMPO'] == turno_tag] if not df_real_hoje.empty else pd.DataFrame()
+            v_carga = int(df_bipes_turno[df_bipes_turno['TIPO_FLUXO'] == 'CARGA']['PALLETS'].sum())
+            v_estrado = int(df_bipes_turno[df_bipes_turno['TIPO_FLUXO'] == 'ESTRADO']['PALLETS'].sum())
+            
+            detalhe_volumes = f"<br><span style='font-size:11px; color:#475569;'>📦 Carga: {v_carga} PLT | 🪵 Estrado: {v_estrado} PLT</span>"
+            
+            if perf_pct >= 0:
+                return f" <span style='color:#25a244; font-weight:bold;'> (+{perf_pct:.1f}% Superou Meta)</span>{detalhe_volumes}"
+            else:
+                justificativa = " (Onerado por Estrados 🪵)" if v_estrado > 0 else " (Abaixo da Meta)"
+                return f" <span style='color:#dc3545; font-weight:bold;'> ({perf_pct:.1f}% Recuo)</span>{justificativa}{detalhe_volumes}"
 
         if dia_semana_hoje == 6:  # Domingo
             status_t1_txt = "🛑 Fábrica Fechada (Plantão inicia às 22h)"
             status_t2_txt = "🛑 Fábrica Fechada (Plantão inicia às 22h)"
-            carga_real_t1, carga_real_t2 = 0, 0
+            carga_real_t1, carga_real_t2, carga_real_t3 = 0, 0, 0
+            perf_t1_html, perf_t2_html, perf_t3_html = "", "", ""
         else:
             # ─── LOGIC TRAP: TURNO 1 DYNAMIC SLA ───
             if hora_atual < time(5, 0):
                 status_t1_txt = "⏳ Aguardando Início de Turno"
                 cor_t1 = "#64748b"
+                carga_real_t1 = 0
+                perf_t1_html = ""
             elif time(5, 0) <= hora_atual < time(13, 30):
                 status_t1_txt = "⚙️ Em Andamento / Previsto"
                 cor_t1 = "#007ebd"
-                carga_real_t1 = t1_confirmado if t1_confirmado > 0 else estimativa_t1
+                carga_real_t1 = t1_confirmado  # Mostra o andamento real parcial da performance
+                perf_t1_html = analisar_SLA_e_mix_hoje(carga_real_t1, estimativa_t1, 'TURNOI')
             elif time(13, 30) <= hora_atual < time(13, 45):
                 status_t1_txt = "⏳ Fim de Turno - Aguardando Auditoria"
                 cor_t1 = "#d97706"
-                carga_real_t1 = t1_confirmado if t1_confirmado > 0 else estimativa_t1
+                carga_real_t1 = t1_confirmado
+                perf_t1_html = analisar_SLA_e_mix_hoje(carga_real_t1, estimativa_t1, 'TURNOI')
             else:
-                if t1_confirmado > 0:
-                    status_t1_txt = "✅ Concluído e Consolidado"
-                    cor_t1 = "#25a244"
-                    carga_real_t1 = t1_confirmado
-                else:
-                    status_t1_txt = "❌ Finalizado Sem Informação"
-                    cor_t1 = "#475569"
-                    carga_real_t1 = 0
+                status_t1_txt = "✅ Concluído e Consolidado" if t1_confirmado > 0 else "❌ Finalizado Sem Informação"
+                cor_t1 = "#25a244" if t1_confirmado > 0 else "#475569"
+                carga_real_t1 = t1_confirmado
+                perf_t1_html = analisar_SLA_e_mix_hoje(carga_real_t1, estimativa_t1, 'TURNOI') if t1_confirmado > 0 else ""
 
             # ─── LOGIC TRAP: TURNO 2 DYNAMIC SLA ───
             if hora_atual < time(13, 30):
                 status_t2_txt = "⏳ Aguardando Início de Turno"
                 cor_t2 = "#64748b"
+                carga_real_t2 = 0
+                perf_t2_html = ""
             elif time(13, 30) <= hora_atual < time(22, 0):
                 status_t2_txt = "⚙️ Em Andamento / Previsto"
                 cor_t2 = "#007ebd"
-                carga_real_t2 = t2_confirmado if t2_confirmado > 0 else estimativa_t2
+                carga_real_t2 = t2_confirmado
+                perf_t2_html = analisar_SLA_e_mix_hoje(carga_real_t2, estimativa_t2, 'TURNOII')
             elif time(22, 0) <= hora_atual < time(22, 15):
                 status_t2_txt = "⏳ Fim de Turno - Aguardando Auditoria"
                 cor_t2 = "#d97706"
-                carga_real_t2 = t2_confirmado if t2_confirmado > 0 else estimativa_t2
+                carga_real_t2 = t2_confirmado
+                perf_t2_html = analisar_SLA_e_mix_hoje(carga_real_t2, estimativa_t2, 'TURNOII')
             else:
-                if t2_confirmado > 0:
-                    status_t2_txt = "✅ Concluído e Consolidado"
-                    cor_t2 = "#25a244"
-                    carga_real_t2 = t2_confirmado
-                else:
-                    status_t2_txt = "❌ Finalizado Sem Informação"
-                    cor_t2 = "#475569"
-                    carga_real_t2 = 0
+                status_t2_txt = "✅ Concluído e Consolidado" if t2_confirmado > 0 else "❌ Finalizado Sem Informação"
+                cor_t2 = "#25a244" if t2_confirmado > 0 else "#475569"
+                carga_real_t2 = t2_confirmado
+                perf_t2_html = analisar_SLA_e_mix_hoje(carga_real_t2, estimativa_t2, 'TURNOII') if t2_confirmado > 0 else ""
 
-        # ─── LOGIC TRAP: TURNO 3 DYNAMIC SLA & DEGRADAÇÃO DE CAPACIDADE ───
+        # ─── LOGIC TRAP: TURNO 3 DYNAMIC SLA ───
         if dia_semana_hoje == 5 and hora_atual >= time(22, 0):
             status_t3_txt = "🛑 Fim de Plantão (Retorno Domingo 22h)"
             carga_real_t3 = 0
+            perf_t3_html = ""
         elif dia_semana_hoje == 6 and hora_atual < time(22, 0):
             status_t3_txt = "⏳ Aguardando Início do Plantão Noturno"
             carga_real_t3 = 0
+            perf_t3_html = ""
         else:
             if hora_atual >= time(22, 0) or hora_atual < time(5, 0):
                 status_t3_txt = "⚙️ Noturno Em Andamento ➔ (Jornada Segunda)" if dia_semana_hoje == 6 else "⚙️ Noturno Em Andamento"
                 cor_t3 = "#007ebd"
-                carga_real_t3 = t3_confirmado if t3_confirmado > 0 else estimativa_t3
+                carga_real_t3 = t3_confirmado
+                perf_t3_html = analisar_SLA_e_mix_hoje(carga_real_t3, estimativa_t3, 'TURNOIII')
                 
-                # 🪵 ENGENHARIA DE DEGRADAÇÃO DA CAPACIDADE (AUDITORIA DAS 02H00 AS 05h00)
+                # Engenharia de degradação temporal das estufas
                 if hora_atual >= time(2, 0) and hora_atual < time(5, 0) and t3_confirmado == 0:
-                    # Se passou das 02:00 e o pátio não inseriu bipes, calcula a perda de estufas por decréscimo de tempo
                     horas_ociosas = (agora_br - agora_br.replace(hour=2, minute=0, second=0)).seconds // 3600
                     ciclos_perdidos = min(int(horas_ociosas // 2) + 1, ciclos_t3)
                     estimativa_t3 = max(0, (ciclos_t3 - ciclos_perdidos) * rend_t3)
-                    carga_real_t3 = estimativa_t3
                     status_t3_txt = f"⚙️ Noturno Ocioso (Perda de {ciclos_perdidos} Estufas)"
                     cor_t3 = "#ea580c"
-            
+                    perf_t3_html = analisar_SLA_e_mix_hoje(carga_real_t3, estimativa_t3, 'TURNOIII')
             elif time(5, 0) <= hora_atual < time(5, 15):
                 status_t3_txt = "⏳ Fim de Turno - Aguardando Auditoria"
                 cor_t3 = "#d97706"
-                carga_real_t3 = t3_confirmado if t3_confirmado > 0 else estimativa_t3
+                carga_real_t3 = t3_confirmado
+                perf_t3_html = analisar_SLA_e_mix_hoje(carga_real_t3, estimativa_t3, 'TURNOIII')
             else:
-                if t3_confirmado > 0:
-                    status_t3_txt = "✅ Concluído e Consolidado"
-                    cor_t3 = "#25a244"
-                    carga_real_t3 = t3_confirmado
-                else:
-                    status_t3_txt = "❌ Finalizado Sem Informação"
-                    cor_t3 = "#475569"
-                    carga_real_t3 = 0
+                status_t3_txt = "✅ Concluído e Consolidado" if t3_confirmado > 0 else "❌ Finalizado Sem Informação"
+                cor_t3 = "#25a244" if t3_confirmado > 0 else "#475569"
+                carga_real_t3 = t3_confirmado
+                perf_t3_html = analisar_SLA_e_mix_hoje(carga_real_t3, estimativa_t3, 'TURNOIII') if t3_confirmado > 0 else ""
 
-        # Renderização dos Cards Visuais Atualizados na Tela
+        # Renderização dos Cards Visuais Atualizados com Alinhamento Estrito
         ct1, ct2, ct3 = st.columns(3)
         with ct1:
-            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t1}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 1 (05h00 - 13h30)</span><h4 style="margin: 5px 0; color: {cor_t1};">{status_t1_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t1} PLT (Plan: {ciclos_t1 * rend_t1} / Real: {t1_confirmado})</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t1}; height: 160px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 1 (05h00 - 13h30)</span><h4 style="margin: 5px 0; color: {cor_t1};">{status_t1_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t1} PLT (Plan: {ciclos_t1 * rend_t1} / Real: {t1_confirmado}){perf_t1_html}</p></div>', unsafe_allow_html=True)
         with ct2:
-            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t2}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 2 (13h30 - 22h00)</span><h4 style="margin: 5px 0; color: {cor_t2};">{status_t2_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t2} PLT (Plan: {ciclos_t2 * rend_t2} / Real: {t2_confirmado})</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t2}; height: 160px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 2 (13h30 - 22h00)</span><h4 style="margin: 5px 0; color: {cor_t2};">{status_t2_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t2} PLT (Plan: {ciclos_t2 * rend_t2} / Real: {t2_confirmado}){perf_t2_html}</p></div>', unsafe_allow_html=True)
         with ct3:
-            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t3}; height: 140px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 3 (22h00 - 05h00)</span><h4 style="margin: 5px 0; color: {cor_t3};">{status_t3_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t3} PLT (Plan: {ciclos_t3 * rend_t3} / Real: {t3_confirmado})</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="background-color: #f8f9fa; border-radius: 8px; padding: 15px; border-left: 5px solid {cor_t3}; height: 160px;"><span style="font-size: 14px; font-weight: bold; color: #475569;">TURNO 3 (22h00 - 05h00)</span><h4 style="margin: 5px 0; color: {cor_t3};">{status_t3_txt}</h4><p style="margin: 0; font-size: 14px;"><b>Impacto Demanda:</b> {carga_real_t3} PLT (Plan: {ciclos_t3 * rend_t3} / Real: {t3_confirmado}){perf_t3_html}</p></div>', unsafe_allow_html=True)
 
         st.markdown("---")
         
@@ -300,13 +332,19 @@ if df is not None:
                 if idx > 0 and col_idx == 0:
                     colunas_cards = st.columns(min(len(agrupado_sobras) - idx, 4))
                 
-                data_formatada_card = row['Data_Ajustada_Sobras'].strftime('%d/%m/%Y')
+                data_alvo_card = row['Data_Ajustada_Sobras']
+                data_formatada_card = data_alvo_card.strftime('%d/%m/%Y')
+                
+                df_recorte_card = df_sobras_geral[df_sobras_geral['Data_Ajustada_Sobras'] == data_alvo_card]
+                mod_mari_card = len(df_recorte_card[df_recorte_card['Modal'].str.contains('Marítimo', case=False, na=False)])
+                mod_rodo_card = len(df_recorte_card[df_recorte_card['Modal'].str.contains('Rodoviário', case=False, na=False)])
+
                 with colunas_cards[col_idx]:
                     st.markdown(estilo_card_topo.format(
                         cor="#f59e0b", 
                         titulo=f"Dia {data_formatada_card}", 
                         valor=f"{int(row['total_pallets'])} PLT", 
-                        subtitulo=f"{int(row['total_cargas'])} percursos soltos"
+                        subtitulo=f"🚢 Marítimo: {mod_mari_card} | 🚚 Rodo: {mod_rodo_card}"
                     ), unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
