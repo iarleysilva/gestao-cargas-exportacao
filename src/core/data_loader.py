@@ -23,7 +23,7 @@ URL_BIPES_TURNOS = {
 }
 
 # 🔒 Cache independente para Demanda HT (Validade: 5 minutos)
-@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Módulo Demanda HT...")
+@st.cache_data(show_spinner="⏳ Sincronizando Módulo Demanda HT...")
 def carregar_e_tratar_dados():
     """ [MÓDULO: DEMANDA HT] """
     try:
@@ -55,7 +55,7 @@ def carregar_e_tratar_dados():
 
 
 # 🔒 Cache independente para Mercado Externo (Validade: 5 minutos)
-@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Módulo Mercado Externo (ME)...")
+@st.cache_data(show_spinner="⏳ Sincronizando Módulo Mercado Externo (ME)...")
 def carregar_dados_separacao():
     """ [MÓDULO: MERCADO EXTERNO (ME)] """
     try:
@@ -126,7 +126,7 @@ def carregar_dados_separacao():
 
 
 # 🔒 Cache independente para Mercado Interno (Validade: 5 minutos)
-@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Módulo Mercado Interno (MI)...")
+@st.cache_data(show_spinner="⏳ Sincronizando Módulo Mercado Interno (MI)...")
 def carregar_dados_separacao_mi():
     """ [MÓDULO: MERCADO INTERNO (MI)] """
     try:
@@ -183,7 +183,7 @@ def carregar_dados_separacao_mi():
 
 
 # 🔒 Cache independente para Execução de Turnos (Validade: 5 minutos)
-@st.cache_data(ttl=300, show_spinner="⏳ Atualizando Produtividade dos Turnos...")
+@st.cache_data(show_spinner="⏳ Atualizando Produtividade dos Turnos...")
 def carregar_execucao_turnos():
     """ [MÓDULO: BIPES DOS TURNOS] """
     df_consolidado = []
@@ -208,7 +208,7 @@ def carregar_execucao_turnos():
 
 
 # 🔒 Cache independente para Realizado HT (Validade: 5 minutos)
-@st.cache_data(ttl=300, show_spinner="⏳ Puxando Histórico Realizado HT...")
+@st.cache_data(show_spinner="⏳ Puxando Histórico Realizado HT...")
 def carregar_realizado_ht(ano_selecionado="2026"):
     """ [MÓDULO: REALIZADO HT - CORRIGIDO] """
     try:
@@ -236,7 +236,7 @@ def carregar_realizado_ht(ano_selecionado="2026"):
 
 
 # 🔒 Cache independente para Faturamento HT (Validade: 5 minutos)
-@st.cache_data(ttl=300)
+@st.cache_data(show_spinner="⏳ Puxando Faturamento HT...")
 def carregar_faturamento_ht(ano_selecionado="2026"):
     """ [MÓDULO: FATURAMENTO HT] """
     try:
@@ -250,7 +250,7 @@ def carregar_faturamento_ht(ano_selecionado="2026"):
 
 # 🔒 Cache independente para Sequenciamento de Lastras (Validade: 5 minutos)
 # 🛡️ VERSÃO FINAL V7.4: Inteligente e adaptável para cabeçalhos unificados ou originais
-@st.cache_data(ttl=300, show_spinner="⏳ Sincronizando Painel de Lastras...")
+@st.cache_data(show_spinner="⏳ Sincronizando Painel de Lastras...")
 def carregar_dados_lastras_novas():
     """ [MÓDULO: SEQUENCIAMENTO DE LASTRAS - PADRÃO MI/ME FLEXÍVEL] """
     try:
@@ -320,7 +320,7 @@ def carregar_dados_lastras_novas():
 
 
 # 🔒 Cache independente para Matriz de Capacidade (Validade: 5 minutos)
-@st.cache_data(ttl=300, show_spinner="⏳ Carregando Parâmetros Mestre...")
+@st.cache_data(show_spinner="⏳ Carregando Parâmetros Mestre...")
 def carregar_matriz_capacidade():
     """ [MÓDULO: PARAMETRIZAÇÃO DINÂMICA] """
     try:

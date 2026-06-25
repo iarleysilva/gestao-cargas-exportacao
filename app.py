@@ -76,6 +76,19 @@ opcao = st.sidebar.radio(
     ]
 )
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔄 Controle de Dados")
+
+# 🎯 O BOTÃO DE SINCRONIZAÇÃO GESTORA PEDIDA PELO CHEFE:
+if st.sidebar.button("🔄 Atualizar Dados do Sheets"):
+    with st.sidebar.status("📥 Buscando novas linhas no pátio...", expanded=True) as status:
+        # Limpa toda a RAM guardada pelo data_loader instantaneamente
+        st.cache_data.clear()
+        status.update(label="✅ Base de Dados Sincronizada!", state="complete")
+    st.rerun()
+
+st.sidebar.caption("O banco está 100% congelado na memória para a reunião. Clique acima para forçar uma nova puxada.")
+
 # ─── ESTILIZAÇÃO DO CONTEÚDO (CSS PARA O LOOK PROFISSIONAL) ───
 st.markdown("""
     <style>
