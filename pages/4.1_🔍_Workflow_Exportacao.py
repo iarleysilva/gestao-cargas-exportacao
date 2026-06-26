@@ -49,7 +49,29 @@ if not st.session_state["autenticado"]:
     st.stop()
 
 # ───────────────────────────────────────────────────────────────────────────────────
-# 🎨 SE PASSOU DA SENHA: INTERFACE DE AUDITORIA OPERACIONAL DO FLOWS ME 4.1
+# 🖨️ INTELIGÊNCIA DEDICADA DE IMPRESSÃO (ESTRUTURA COMPACTA PARA CÓDIGO LIMPO)
+# ───────────────────────────────────────────────────────────────────────────────────
+class PDFGeradorLote(FPDF):
+    def header(self):
+        # Top Banner Corporativo do Laudo Executivo
+        self.set_fill_color(30, 58, 138)
+        self.rect(0, 0, 210, 30, 'F')
+        self.set_text_color(255, 255, 255)
+        self.set_font("Helvetica", 'B', 12)
+        self.set_y(8)
+        self.cell(0, 5, "PORTOBELLO S.A. | CONTROLADORIA OPERACIONAL PCO", ln=1, align="L")
+        self.set_font("Helvetica", '', 9)
+        self.cell(0, 4, "Laudo Técnico de Auditoria E2E e Lead Times por Evento (Mercado Externo)", ln=1, align="L")
+        self.set_y(35)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", 'I', 8)
+        self.set_text_color(148, 163, 184)
+        self.cell(0, 10, f"Página {self.page_no()} | Homologação Flows ME 4.1", align="C")
+
+# ───────────────────────────────────────────────────────────────────────────────────
+# 🎨 INTERFACE DE AUDITORIA OPERACIONAL DO FLOWS ME 4.1
 # ───────────────────────────────────────────────────────────────────────────────────
 
 # Estilização CSS Premium para a Linha do Tempo e Tabelas de Processo
@@ -128,28 +150,39 @@ else:
 
 # --- ÁREA DE FILTROS INTELIGENTES ---
 st.markdown("### 🎛️ Filtros de Pesquisa por Processo")
-col1, col2 = st.columns(2)
 
-with col1:
-    lista_bookings = ["-- Selecione um Booking --"] + sorted([str(b) for b in df_wk['booking'].dropna().unique() if str(b) != 'nan'])
-    booking_selecionado = st.selectbox("Filtrar por Reserva de Porto (Booking):", lista_bookings)
+df_wk['dt_plan_parsed'] = pd.to_datetime(df_wk['dt_carregamento_plan'], errors='coerce')
+df_wk['ano_processo'] = df_wk['dt_plan_parsed'].dt.year.fillna(0).astype(int)
+anos_disponiveis = sorted([int(a) for a in df_wk['ano_processo'].unique() if a > 0])
 
-with col2:
-    fatura_digitada = st.text_input("Ou digite o número da Fatura Comercial (Ex: 1457 ou 2192):", placeholder="Ex: 1457").strip()
+col_ano, col_bkg, col_fat = st.columns([1, 2, 2])
 
-# Execução do Filtro Lógico
+with col_ano:
+    ano_selecionado = st.selectbox("1. Escolha o Ano de Pesquisa:", anos_disponiveis, index=len(anos_disponiveis)-1)
+
+# Trava de segurança para buscar registros APENAS do ano corrente
+df_wk_ano = df_wk[df_wk['ano_processo'] == ano_selecionado]
+
+with col_bkg:
+    lista_bookings = ["-- Selecione um Booking --"] + sorted([str(b) for b in df_wk_ano['booking'].dropna().unique() if str(b) != 'nan'])
+    booking_selecionado = st.selectbox("2. Filtrar por Booking:", lista_bookings)
+
+with col_fat:
+    fatura_digitada = st.text_input("3. Ou digite a Fatura Comercial (Ex: 1457 ou 2192):", placeholder="Ex: 1457").strip()
+
+# Execução do Filtro Lógico Amarrado ao Ano Corrente
 df_filtrado = pd.DataFrame()
 if fatura_digitada:
     fatura_busca_pura = fatura_digitada.split('/')[0].strip()
-    df_filtrado = df_wk[df_wk['fatura_pura'] == fatura_busca_pura]
+    df_filtrado = df_wk_ano[df_wk_ano['fatura_pura'] == fatura_busca_pura]
 elif booking_selecionado != "-- Selecione um Booking --":
-    df_filtrado = df_wk[df_wk['booking'].astype(str) == booking_selecionado]
+    df_filtrado = df_wk_ano[df_wk_ano['booking'].astype(str) == booking_selecionado]
 
 # --- RENDERIZAÇÃO DA ESTEIRA DO FLOWS ---
 if df_filtrado.empty:
     st.markdown("""
         <div style="text-align: center; border: 2px dashed #cbd5e1; padding: 40px; border-radius: 8px; background-color: #f8fafc;">
-            <p style="color: #64748b; font-weight: 500; font-size:15px; margin:0;">💡 Insira uma Fatura válida ou escolha um Booking para projetar a análise e emitir o Laudo em PDF.</p>
+            <p style="color: #64748b; font-weight: 500; font-size:15px; margin:0;">💡 Escolha o Ano e insira uma Fatura válida ou escolha um Booking para projetar o pacote de contêineres.</p>
         </div>
     """, unsafe_allow_html=True)
 else:
@@ -169,6 +202,109 @@ else:
         except:
             return None
 
+    # ─── MOTOR SÊNIOR DE EMISSÃO PDF: DETALHADO POR CONTEINER + SOMA GLOBAL E LEAD TIMES ───
+    def gerar_pdf_pacote_com_leadtimes(dados_df, fat_id, ano_ref):
+        pdf = PDFGeradorLote()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        
+        # 📄 PÁGINA 1: CAPA COM A SOMA CONSOLIDADA DO PROCESSO COMO UM TODO
+        pdf.add_page()
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_font("Helvetica", 'B', 14)
+        pdf.cell(0, 10, f"LAUDO AUDITOR COCKPIT - PACOTE DE EXPEDICAO", ln=1)
+        pdf.set_font("Helvetica", '', 10)
+        pdf.cell(0, 5, f"Fatura Analisada: {limpar_txt(fat_id)} | Ano Fiscal Mapeado: {ano_ref}", ln=1)
+        pdf.ln(5)
+        
+        # Agregadores Totais
+        total_cntrs = len(dados_df)
+        soma_receita = pd.to_numeric(dados_df['receita_total_faturada_reais'], errors='coerce').fillna(0).sum()
+        soma_pecas = pd.to_numeric(dados_df['total_pecas_faturadas'], errors='coerce').fillna(0).sum()
+        
+        pdf.set_fill_color(241, 245, 249)
+        pdf.set_font("Helvetica", 'B', 11)
+        pdf.cell(190, 8, " 1. RESUMO GERAL CONSOLIDADO DO EMBARQUE (SOMA DO PROCESSO)", ln=1, fill=True)
+        pdf.set_font("Helvetica", '', 10)
+        pdf.cell(190, 7, f" * Total de Ativos no Lote: {total_cntrs} Conteiner(es)", ln=1)
+        pdf.cell(190, 7, f" * Faturamento Total Integrado: R$ {soma_receita:,.2f}", ln=1)
+        pdf.cell(190, 7, f" * Volume de Pecas Faturadas no Lote: {soma_pecas:,.2f} un", ln=1)
+        
+        # Listagem resumida do pacote
+        pdf.ln(5)
+        pdf.set_font("Helvetica", 'B', 11)
+        pdf.cell(190, 8, " 2. INDEXADOR DE DISPARO DE ATIVOS NO PACOTE", ln=1, fill=True)
+        pdf.set_font("Helvetica", 'B', 9)
+        pdf.cell(30, 7, "ID Percurso", border=1)
+        pdf.cell(45, 7, "Sigla Conteiner", border=1)
+        pdf.cell(40, 7, "Canal Patio", border=1)
+        pdf.cell(75, 7, "Cliente", border=1, ln=1)
+        
+        pdf.set_font("Helvetica", '', 9)
+        for _, r in dados_df.iterrows():
+            pdf.cell(30, 7, str(r.get('percurso')), border=1)
+            pdf.cell(45, 7, str(r.get('container_sigla', 'N/A')), border=1)
+            pdf.cell(40, 7, str(r.get('canal_patio', 'N/A')), border=1)
+            pdf.cell(75, 7, str(r.get('cliente', 'N/A'))[:35], border=1, ln=1)
+            
+        # 📄 PÁGINAS SEGUINTES: DETALHAMENTO DO LAUDO DE LEAD TIME POR EVENTO PONTA A PONTA
+        for _, r in dados_df.iterrows():
+            pdf.add_page()
+            pid = str(r.get('percurso', 'N/A'))
+            cntr = str(r.get('container_sigla', 'N/A'))
+            
+            pdf.set_font("Helvetica", 'B', 12)
+            pdf.cell(190, 8, f"AUDITORIA INDIVIDUAL - CONTEINER: {cntr} / PERCURSO: {pid}", ln=1, fill=True)
+            pdf.set_font("Helvetica", '', 10)
+            pdf.cell(190, 6, f"Cliente Consignatario: {limpar_txt(r.get('cliente'))}", ln=1)
+            pdf.cell(190, 6, f"Canal de Venda WMS: {limpar_txt(r.get('desc_canal_wms'))} | Prioridade: {limpar_txt(r.get('prioridade_wms'))}", ln=1)
+            pdf.cell(190, 6, f"Tipologia da Carga: {limpar_txt(r.get('indic_lastras'))} | Nota Fiscal: {str(r.get('ultima_nf_emitida', 'N/A'))}", ln=1)
+            pdf.ln(4)
+            
+            # --- SEÇÃO COMPACTA DE METRICAS DE LEAD TIMES POR EVENTO PONTA A PONTA ---
+            pdf.set_font("Helvetica", 'B', 11)
+            pdf.cell(190, 7, " TRACKING DE LEAD TIMES DE EXECUÇÃO ADUANEIRA E LOGÍSTICA:", ln=1, fill=True)
+            pdf.set_font("Helvetica", '', 10)
+            
+            # 1. Lead Time de Separação Interna (WMS)
+            t_nasc = fmt_dt(r.get('data_nascimento_percurso'))
+            t_pront = fmt_dt(r.get('data_carga_pronta_wms'))
+            lt_wms = f"{((t_pront - t_nasc).total_seconds() / 3600):.1f} horas" if t_nasc and t_pront else "N/A"
+            pdf.cell(190, 6, f" * SLA de Separação (Nascimento ERP ate Carga Pronta WMS): {lt_wms}", ln=1)
+            
+            # 2. Lead Time de Espera do Caminhão (Janela Logística)
+            t_cheg = fmt_dt(r.get('dt_chegada_fabrica'))
+            lt_espera = f"{((t_cheg - t_pront).total_seconds() / 3600):.1f} horas" if t_cheg and t_pront else "N/A"
+            pdf.cell(190, 6, f" * Tempo de Reação Logística (Carga Pronta ate Chegada do Veículo): {lt_espera}", ln=1)
+            
+            # 3. Lead Time de Giro de Doca (Estufagem Física)
+            t_ent = fmt_dt(r.get('dt_entrada_fabrica'))
+            t_carreg = fmt_dt(r.get('dt_carregamento_real'))
+            lt_doca = f"{((t_carreg - t_ent).total_seconds() / 3600):.1f} horas" if t_ent and t_carreg else "N/A"
+            pdf.cell(190, 6, f" * Giro de Doca / Carregamento (Entrada Portaria ate Fim Estufagem): {lt_doca}", ln=1)
+            
+            # 4. Lead Time de Permanência Total no Pátio
+            t_sai = fmt_dt(r.get('dt_saida_fabrica'))
+            lt_patio = f"{((t_sai - t_cheg).total_seconds() / 3600):.1f} horas" if t_cheg and t_sai else "N/A"
+            pdf.cell(190, 6, f" * Ciclo de Vida em Pátio Fábrica (Permanência Chegada ate Saída): {lt_patio}", ln=1)
+            
+        return bytes(pdf.output(dest='S'))
+
+    # Renderização Executiva do Botão Mestre de Laudo PDF
+    fatura_mestre_id = str(df_filtrado.iloc[0].get('fatura_patio', fatura_digitada))
+    st.markdown("### 📄 Emissão Documental Técnica e Auditoria")
+    
+    pdf_bytes_lote = gerar_pdf_pacote_completo(df_filtrado, fatura_mestre_id, ano_selecionado) if 'gerar_pdf_pacote_completo' in locals() else gerar_pdf_pacote_com_leadtimes(df_filtrado, fatura_mestre_id, ano_selecionado)
+    
+    st.download_button(
+        label=f"📥 Baixar Laudo Técnico PDF Consolidado (Soma de {len(df_filtrado)} Cargas + Lead Times por Evento)",
+        data=pdf_bytes_lote,
+        file_name=f"Laudo_Executivo_ME_Fatura_{fatura_mestre_id.replace('/', '_')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+    st.markdown("---")
+
+    # RENDERIZAÇÃO SECUNDÁRIA DO LOOP DOS CARDS OPERACIONAIS NA TELA
     for idx, row in df_filtrado.iterrows():
         fatura_id = str(row.get('fatura_patio', 'N/A'))
         container_sigla = str(row.get('container_sigla', 'N/A'))
@@ -177,7 +313,6 @@ else:
         
         is_maritimo = pd.notna(row.get('booking')) and str(row.get('booking')).lower() != 'nan' and str(row.get('booking')).strip() != ""
         txt_modal_tela = "🚢 MARÍTIMO" if is_maritimo else "🚛 RODOVIÁRIO TERRESTRE (MERCOSUL)"
-        txt_modal_pdf = "MARITIMO" if is_maritimo else "RODOVIARIO TERRESTRE"
         cor_modal = "background-color: #e0f2fe; color: #0369a1;" if is_maritimo else "background-color: #fef3c7; color: #b45309;"
 
         cliente_id = str(row.get('cliente')) if pd.notna(row.get('cliente')) else "Cliente em Análise Aduaneira"
@@ -188,21 +323,9 @@ else:
         
         desc_canal_wms = str(row.get('desc_canal_wms', 'DIRECT SALE'))
         prioridade_wms = str(row.get('prioridade_wms', 'EXPORTAÇÃO - PORTO'))
-        tipo_formato = str(row.get('indic_lastras', 'Outros formatos'))
+        tipo_formato = str(row.get('indic_lastras', 'Outros formats'))
         cor_formato = "color: #e11d48; font-weight: bold;" if tipo_formato == "Lastras" else "color: #0f172a;"
 
-        receita_reais = pd.to_numeric(row.get('receita_total_faturada_reais'), errors='coerce')
-        receita_reais = float(receita_reais) if pd.notna(receita_reais) else 0.0
-        total_pecas = pd.to_numeric(row.get('total_pecas_faturadas'), errors='coerce')
-        total_pecas = float(total_pecas) if pd.notna(total_pecas) else 0.0
-        nf_emitida = pd.to_numeric(row.get('ultima_nf_emitida'), errors='coerce')
-        nf_valida = int(nf_emitida) if pd.notna(nf_emitida) and nf_emitida > 0 else 0
-
-        txt_faturamento = f'R$ {receita_reais:,.2f}' if receita_reais > 0 else 'Aguardando Gatilho Contábil'
-        txt_nf = f'{nf_valida}' if nf_valida > 0 else 'N/A'
-        txt_pecas = f'{total_pecas:,.2f} un' if total_pecas > 0 else 'Em Carregamento'
-
-        # 📐 EXTRAÇÃO SECA DOS NOMES EXATOS DAS COLUNAS (17)
         dt_nascimento = fmt_dt(row.get('data_nascimento_percurso'))
         dt_pronta_wms = fmt_dt(row.get('data_carga_pronta_wms'))
         lead_time_wms_cd = "N/A"
@@ -219,7 +342,7 @@ else:
             if diff_patio >= 0:
                 lead_time_patio = f"{diff_patio:.1f} horas"
 
-        # Cockpit Executivo na Tela
+        # Cockpit Visual na Tela
         st.markdown(f"""
         <div class="card-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -230,7 +353,7 @@ else:
                 <div class="metric-box"><div class="metric-title">📋 Fatura Ativa</div><div class="metric-value">{fatura_id}</div></div>
                 <div class="metric-box"><div class="metric-title">🚦 Formato Carga</div><div class="metric-value" style="{cor_formato}">{tipo_formato}</div></div>
                 <div class="metric-box"><div class="metric-title">🚦 Canal Pátio</div><div class="metric-value" style="color: {'#16a34a' if canal=='VERDE' else '#475569'}; font-weight:bold;">{canal}</div></div>
-                <div class="metric-box"><div class="metric-title">⏱️ Lead Time Separacao (CD)</div><div class="metric-value" style="color: #2563eb;">{lead_time_wms_cd}</div></div>
+                <div class="metric-box"><div class="metric-title">⏱️ Lead Time CD (WMS)</div><div class="metric-value" style="color: #2563eb;">{lead_time_wms_cd}</div></div>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; font-size: 13px; color: #475569; background-color:#f8fafc; padding:12px; border-radius:6px; border: 1px solid #e2e8f0;">
                 <div><b>🏢 Cliente Final:</b> {cliente_id}</div>
@@ -241,7 +364,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-        # --- ABAS DE PROCESSO RECONSTRUÍDAS SEM ESPAÇOS DE MARGEM (RESOLVE O BUG VISUAL) ---
+        # --- CONSTRUÇÃO DAS ABAS DE DETALHES ---
         nome_aba_3 = "🚢 3. Escoamento Marítimo & Porto" if is_maritimo else "<b>🚛 3. Escoamento Terrestre (Fronteira)</b>"
         t1, t2, t3 = st.tabs(["🏭 1. Logística de Pátio & Fábrica (CD)", "📋 2. SLA & Documental PCO", nome_aba_3])
         
@@ -269,7 +392,6 @@ else:
                 icone = '✅' if txt_d else '⏳'
                 classe_status = 'status-ok' if txt_d else 'status-wait'
                 txt_data_exibida = f'<span class="date-text">{txt_d}</span>' if txt_d else '<span class="pending-text">Aguardando Processo</span>'
-                # Construção em linha única contínua sem espaços na esquerda para travar o renderizador HTML
                 h1 += f"<tr><td style='font-weight:bold; color:#1e3a8a;'>{m['fase']}</td><td class='{classe_status}'>{icone}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{txt_data_exibida}</td></tr>"
                 
             st.markdown(f'<table class="wf-table"><tr><th style="width:15%;">ESTÁGIO</th><th style="width:10%; text-align:center;">STATUS</th><th style="width:45%;">MARCO OPERACIONAL DO PERCURSO</th><th style="width:30%;">DATA / HORA REALIZADO</th></tr>{h1}</table>', unsafe_allow_html=True)
@@ -287,7 +409,6 @@ else:
                 classe_status = 'status-ok' if txt_d else 'status-wait'
                 txt_data_exibida = f'<span class="date-text">{txt_d}</span>' if txt_d else '<span class="pending-text">Pendente / Em Trâmite</span>'
                 h2 += f"<tr><td class='{classe_status}'>{icone}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{txt_data_exibida}</td></tr>"
-                
             st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO REGULAMENTAR & FISCAL</th><th style="width:40%;">DATA / HORA REALIZADO</th></tr>{h2}</table>', unsafe_allow_html=True)
 
         with t3:
