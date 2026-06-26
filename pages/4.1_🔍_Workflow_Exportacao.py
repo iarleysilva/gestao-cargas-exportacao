@@ -82,40 +82,48 @@ with col_logout:
 
 st.markdown("---")
 
-# 💾 FUNÇÃO DE CACHE REFEITA (SÓ ENGENHARIA DE DADOS PURA, SEM COISAS VISUAIS)
+# 💾 FUNÇÃO DE CACHE ADAPTATIVA (ROBUSTA CONTRA DIRETÓRIOS DO TERMINAL)
 @st.cache_data(ttl=300)
 def carregar_base_flows_suprema_local():
+    nome_arquivo = "Dados_para_teste_workflows_ME (17).csv"
     caminho_script = Path(__file__).resolve()
     raiz_projeto = caminho_script.parent.parent
-    caminho_csv = raiz_projeto / "src" / "data" / "Dados_workflows_ME (13).csv"
     
-    if caminho_csv.exists():
-        df = pd.read_csv(caminho_csv)
-        if 'fatura_patio' in df.columns:
-            df['fatura_pura'] = df['fatura_patio'].astype(str).str.split('/').str[0].str.strip()
-        return df
-    return None
+    caminho_1 = raiz_projeto / "src" / "data" / nome_arquivo
+    caminho_2 = Path("src/data") / nome_arquivo
+    caminho_3 = Path(nome_arquivo).resolve()
+    
+    if caminho_1.exists():
+        df = pd.read_csv(caminho_1)
+    elif caminho_2.exists():
+        df = pd.read_csv(caminho_2)
+    elif caminho_3.exists():
+        df = pd.read_csv(caminho_3)
+    else:
+        return None, None
+        
+    if 'fatura_patio' in df.columns:
+        df['fatura_pura'] = df['fatura_patio'].astype(str).str.split('/').str[0].str.strip()
+    return df, nome_arquivo
 
-df_wk = carregar_base_flows_suprema_local()
+df_wk, nome_arquivo_carregado = carregar_base_flows_suprema_local()
 
-# 🚦 ALERTAS VISUAIS RETIRADOS DO CACHE PARA EVITAR O BUG
+# 🚦 ALERTAS VISUAIS FORA DO CACHE
 if df_wk is not None and not df_wk.empty:
-    st.toast("💻 Cockpit ativo! Base oficial carregada com sucesso da pasta organizada.", icon="💾")
+    st.toast(f"💻 Cockpit ativo! Base unificada: {nome_arquivo_carregado}", icon="💾")
 else:
     caminho_script = Path(__file__).resolve()
     raiz_projeto = caminho_script.parent.parent
     pasta_esperada = raiz_projeto / "src" / "data"
-    
     st.markdown(f"""
     <div style="background-color: #fde8e8; border-left: 5px solid #e11d48; padding: 20px; border-radius: 8px; color: #9f1239;">
         <h4 style="margin: 0 0 10px 0; font-weight: 800;">❌ Erro de Organização de Arquivos</h4>
-        <p style="margin: 0 0 10px 0; font-size: 14px;">O arquivo de dados não foi encontrado na pasta esperada pelo sistema.</p>
-        <p style="margin: 0; font-size: 13px;">Por favor, garanta que o arquivo <b>Dados_workflows_ME (13).csv</b> esteja dentro de:<br>
+        <p style="margin: 0 0 10px 0; font-size: 14px;">O arquivo unificado não foi localizado na pasta de dados.</p>
+        <p style="margin: 0; font-size: 13px;">Garanta que o arquivo <b>Dados_para_teste_workflows_ME (17).csv</b> esteja em:<br>
         📂 <code>{pasta_esperada}</code></p>
     </div>
     <br>
     """, unsafe_allow_html=True)
-    st.warning("⚠️ Mova o arquivo para a pasta indicada acima e dê um 'Refresh' na página para liberar os filtros.")
     st.stop()
 
 # --- ÁREA DE FILTROS INTELIGENTES ---
@@ -127,7 +135,7 @@ with col1:
     booking_selecionado = st.selectbox("Filtrar por Reserva de Porto (Booking):", lista_bookings)
 
 with col2:
-    fatura_digitada = st.text_input("Ou digite o número da Fatura Comercial (Ex: 63 ou 63/2024):", placeholder="Ex: 63").strip()
+    fatura_digitada = st.text_input("Ou digite o número da Fatura Comercial (Ex: 1457 ou 2192):", placeholder="Ex: 1457").strip()
 
 # Execução do Filtro Lógico
 df_filtrado = pd.DataFrame()
@@ -154,9 +162,10 @@ else:
         if pd.isna(val) or str(val).strip() == "" or str(val).lower() == "nan":
             return None
         try:
-            limpo = str(val).split('.')[0].replace('T', ' ').replace('Z', '')
-            dt = datetime.strptime(limpo, '%Y-%m-%d %H:%M:%S')
-            return dt
+            limpo = str(val).split('.')[0].replace('T', ' ').replace('Z', '').strip()
+            if len(limpo) == 16:
+                return datetime.strptime(limpo, '%Y-%m-%d %H:%M')
+            return datetime.strptime(limpo, '%Y-%m-%d %H:%M:%S')
         except:
             return None
 
@@ -168,7 +177,7 @@ else:
         
         is_maritimo = pd.notna(row.get('booking')) and str(row.get('booking')).lower() != 'nan' and str(row.get('booking')).strip() != ""
         txt_modal_tela = "🚢 MARÍTIMO" if is_maritimo else "🚛 RODOVIÁRIO TERRESTRE (MERCOSUL)"
-        txt_modal_pdf = "MARITIMO" if is_maritimo else "RODOVIARIO TERRESTRE (MERCOSUL)"
+        txt_modal_pdf = "MARITIMO" if is_maritimo else "RODOVIARIO TERRESTRE"
         cor_modal = "background-color: #e0f2fe; color: #0369a1;" if is_maritimo else "background-color: #fef3c7; color: #b45309;"
 
         cliente_id = str(row.get('cliente')) if pd.notna(row.get('cliente')) else "Cliente em Análise Aduaneira"
@@ -176,13 +185,16 @@ else:
         incoterm = str(row.get('incoterm_codigo')) if pd.notna(row.get('incoterm_codigo')) else "FOB"
         status_fat = str(row.get('status_final_faturamento', 'Aguardando Emissão'))
         canal = str(row.get('canal_patio', 'N/A'))
+        
+        desc_canal_wms = str(row.get('desc_canal_wms', 'DIRECT SALE'))
+        prioridade_wms = str(row.get('prioridade_wms', 'EXPORTAÇÃO - PORTO'))
+        tipo_formato = str(row.get('indic_lastras', 'Outros formatos'))
+        cor_formato = "color: #e11d48; font-weight: bold;" if tipo_formato == "Lastras" else "color: #0f172a;"
 
         receita_reais = pd.to_numeric(row.get('receita_total_faturada_reais'), errors='coerce')
         receita_reais = float(receita_reais) if pd.notna(receita_reais) else 0.0
-        
         total_pecas = pd.to_numeric(row.get('total_pecas_faturadas'), errors='coerce')
         total_pecas = float(total_pecas) if pd.notna(total_pecas) else 0.0
-        
         nf_emitida = pd.to_numeric(row.get('ultima_nf_emitida'), errors='coerce')
         nf_valida = int(nf_emitida) if pd.notna(nf_emitida) and nf_emitida > 0 else 0
 
@@ -190,79 +202,22 @@ else:
         txt_nf = f'{nf_valida}' if nf_valida > 0 else 'N/A'
         txt_pecas = f'{total_pecas:,.2f} un' if total_pecas > 0 else 'Em Carregamento'
 
-        dt_unit_plan = fmt_dt(row.get('dt_unitizacao_plan'))
-        dt_unit_real = fmt_dt(row.get('dt_unitizacao_real'))
-        lead_time_cd = "N/A"
-        if dt_unit_plan and dt_unit_real:
-            diff = dt_unit_real - dt_unit_plan
-            horas = diff.total_seconds() / 3600
-            lead_time_cd = f"{horas:.1f} horas"
+        # 📐 EXTRAÇÃO SECA DOS NOMES EXATOS DAS COLUNAS (17)
+        dt_nascimento = fmt_dt(row.get('data_nascimento_percurso'))
+        dt_pronta_wms = fmt_dt(row.get('data_carga_pronta_wms'))
+        lead_time_wms_cd = "N/A"
+        if dt_nascimento and dt_pronta_wms:
+            diff_wms = (dt_pronta_wms - dt_nascimento).total_seconds() / 3600
+            if diff_wms >= 0:
+                lead_time_wms_cd = f"{diff_wms:.1f} horas"
 
         dt_chegada = fmt_dt(row.get('dt_chegada_fabrica'))
         dt_saida = fmt_dt(row.get('dt_saida_fabrica'))
         lead_time_patio = "N/A"
         if dt_chegada and dt_saida:
-            diff_patio = dt_saida - dt_chegada
-            horas_patio = diff_patio.total_seconds() / 3600
-            lead_time_patio = f"{horas_patio:.1f} horas"
-
-        def gerar_pdf_diagnostico():
-            pdf = FPDF()
-            pdf.add_page()
-            
-            pdf.set_font("Helvetica", 'B', 16)
-            pdf.cell(200, 10, txt="LAUDO DE AUDITORIA OPERACIONAL - FLOWS ME", ln=1, align="C")
-            pdf.ln(5)
-            
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(200, 8, txt=f"Processo: ID Percurso {limpar_txt(percurso_id)} | Fatura {limpar_txt(fatura_id)}", ln=1)
-            pdf.set_font("Helvetica", '', 10)
-            pdf.cell(200, 6, txt=f"Modal Identificado: {txt_modal_pdf}", ln=1)
-            pdf.cell(200, 6, txt=f"Cliente: {limpar_txt(cliente_id)} | Destino: {limpar_txt(destino_id)}", ln=1)
-            pdf.cell(200, 6, txt=f"Incoterm: {limpar_txt(incoterm)} | Motorista: {limpar_txt(row.get('motorista'))} (Placa: {limpar_txt(row.get('cavalo'))})", ln=1)
-            pdf.ln(5)
-            
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(200, 8, txt="1. RESUMO FINANCEIRO E FISCAL", ln=1)
-            pdf.set_font("Helvetica", '', 10)
-            pdf.cell(200, 6, txt=f"Faturamento Bruto da Carga: {limpar_txt(txt_faturamento)}", ln=1)
-            pdf.cell(200, 6, txt=f"Ultima Nota Fiscal Gerada: {limpar_txt(txt_nf)}", ln=1)
-            pdf.cell(200, 6, txt=f"Volume Total Faturado: {limpar_txt(txt_pecas)}", ln=1)
-            pdf.cell(200, 6, txt=f"Status de Faturamento Contabil: {limpar_txt(status_fat)}", ln=1)
-            pdf.ln(5)
-            
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(200, 8, txt="2. METRICAS DE LEAD TIME (EFICIENCIA)", ln=1)
-            pdf.set_font("Helvetica", '', 10)
-            pdf.cell(200, 6, txt=f"SLA de Preparacao / Unitizacao (CD): {limpar_txt(lead_time_cd)}", ln=1)
-            pdf.cell(200, 6, txt=f"Tempo de Permanencia Interno (Patio): {limpar_txt(lead_time_patio)}", ln=1)
-            pdf.ln(5)
-            
-            pdf.set_font("Helvetica", 'B', 12)
-            pdf.cell(200, 8, txt="3. DIAGNOSTICO DE RISCOS OPERACIONAIS", ln=1)
-            pdf.set_font("Helvetica", '', 10)
-            
-            if is_maritimo:
-                dt_lib_porto = fmt_dt(row.get('dt_carga_liberada_porto'))
-                dt_deadline = fmt_dt(row.get('dt_deadline_carga'))
-                if dt_lib_porto and dt_deadline:
-                    margem = (dt_deadline - dt_lib_porto).total_seconds() / 3600
-                    if margem < 24:
-                        pdf.cell(200, 6, txt="RISCO ALERTA: Liberacao proxima ao corte de carga do navio (Margem critica < 24h).", ln=1)
-                    else:
-                        pdf.cell(200, 6, txt=f"SUCESSO: Processo concluido com margem segura de {margem:.1f}h ate o deadline.", ln=1)
-                else:
-                    pdf.cell(200, 6, txt="STATUS: Carga em transito ou aguardando gate-in/liberacao no porto aduaneiro.", ln=1)
-            else:
-                pdf.cell(200, 6, txt="SUCESSO: Fluxo Terrestre Internacional ativo. Isento de deadlines de navio.", ln=1)
-                pdf.cell(200, 6, txt="STATUS: Documentacao direcionada diretamente para o despacho aduaneiro de fronteira.", ln=1)
-            
-            pdf.ln(10)
-            pdf.set_font("Helvetica", 'I', 9)
-            data_emissao = datetime.now().strftime('%d/%m/%Y as %H:%M:%S')
-            pdf.cell(200, 6, txt=f"Laudo gerado automaticamente pelo Sistema de Integracao PCO em {data_emissao}", ln=1, align="C")
-            
-            return bytes(pdf.output(dest='S'))
+            diff_patio = (dt_saida - dt_chegada).total_seconds() / 3600
+            if diff_patio >= 0:
+                lead_time_patio = f"{diff_patio:.1f} horas"
 
         # Cockpit Executivo na Tela
         st.markdown(f"""
@@ -273,63 +228,70 @@ else:
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 15px;">
                 <div class="metric-box"><div class="metric-title">📋 Fatura Ativa</div><div class="metric-value">{fatura_id}</div></div>
-                <div class="metric-box"><div class="metric-title">🔑 Booking</div><div class="metric-value">{booking_id if booking_id != 'nan' and is_maritimo else 'N/A (Terrestre)'}</div></div>
-                <div class="metric-box"><div class="metric-title">🚦 Canal Alfe</div><div class="metric-value" style="color: {'#16a34a' if canal=='VERDE' else '#475569'};">{canal}</div></div>
-                <div class="metric-box"><div class="metric-title">⏱️ Lead Time CD</div><div class="metric-value" style="color: #2563eb;">{lead_time_cd}</div></div>
+                <div class="metric-box"><div class="metric-title">🚦 Formato Carga</div><div class="metric-value" style="{cor_formato}">{tipo_formato}</div></div>
+                <div class="metric-box"><div class="metric-title">🚦 Canal Pátio</div><div class="metric-value" style="color: {'#16a34a' if canal=='VERDE' else '#475569'}; font-weight:bold;">{canal}</div></div>
+                <div class="metric-box"><div class="metric-title">⏱️ Lead Time Separacao (CD)</div><div class="metric-value" style="color: #2563eb;">{lead_time_wms_cd}</div></div>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; font-size: 13px; color: #475569; background-color:#f8fafc; padding:12px; border-radius:6px; border: 1px solid #e2e8f0;">
                 <div><b>🏢 Cliente Final:</b> {cliente_id}</div>
                 <div><b>🌍 Destino Internacional:</b> {destino_id} | <b>Incoterm:</b> <code>{incoterm}</code></div>
-                <div><b>🚚 Logística Física:</b> {str(row.get('motorista', 'N/I'))} (Placa: <code>{str(row.get('cavalo', 'N/A'))}</code>) | <b>Permanência Pátio:</b> <code>{lead_time_patio}</code></div>
-                <div><b>🪙 Faturamento Real:</b> <span style="color:#16a34a; font-weight:bold;">{txt_faturamento}</span> (NF: <code>{txt_nf}</code>) | <b>🧱 Volume:</b> {txt_pecas}</div>
+                <div><b>🚚 Logística Física:</b> {str(row.get('motorista', 'N/I'))} (Placa: <code>{str(row.get('cavalo', 'N/A'))}</code>) | <b>Giro Pátio:</b> <code>{lead_time_patio}</code></div>
+                <div><b>🚦 Canal WMS:</b> {desc_canal_wms} | <b>Prioridade:</b> {prioridade_wms}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        pdf_data = gerar_pdf_diagnostico()
-        st.download_button(
-            label=f"📄 Baixar Relatório de Diagnóstico de Lead Time (Percurso {percurso_id})",
-            data=pdf_data,
-            file_name=f"Laudo_LeadTime_Percurso_{percurso_id}.pdf",
-            mime="application/pdf",
-            key=f"btn_{idx}"
-        )
-
-        # --- CONSTRUÇÃO DAS ABAS ---
+        # --- ABAS DE PROCESSO RECONSTRUÍDAS SEM ESPAÇOS DE MARGEM (RESOLVE O BUG VISUAL) ---
         nome_aba_3 = "🚢 3. Escoamento Marítimo & Porto" if is_maritimo else "<b>🚛 3. Escoamento Terrestre (Fronteira)</b>"
         t1, t2, t3 = st.tabs(["🏭 1. Logística de Pátio & Fábrica (CD)", "📋 2. SLA & Documental PCO", nome_aba_3])
         
         with t1:
+            st.markdown("##### ⏱️ Linha do Tempo Estendida do Ciclo de Vida do Percurso")
+            
             marcos_patio = [
-                {"etapa": "Planejamento de Janela de Carregamento", "valor": row.get('dt_carregamento_plan')},
-                {"etapa": "Planejamento de Unitização / Estufagem no CD", "valor": row.get('dt_unitizacao_plan')},
-                {"etapa": "Conclusão de Unitização (Carga Pronta na Doca)", "valor": row.get('dt_unitizacao_real')},
-                {"etapa": "Retirada / Coleta de Contêiner Vazio Realizada", "valor": row.get('dt_entrega_vazio_real')},
-                {"etapa": "Chegada do Veículo na Portaria da Fábrica", "valor": row.get('dt_chegada_fabrica')},
-                {"etapa": "Entrada na Fábrica e Acoplamento na Doca", "valor": row.get('dt_entrada_fabrica')},
-                {"etapa": "Fim do Carregamento Físico do Veículo", "valor": row.get('dt_carregamento_real')},
+                {"fase": "🟢 ANTES", "etapa": "Nascimento / Criacao do Percurso no ERP", "valor": row.get('data_nascimento_percurso')},
+                {"fase": "🟢 ANTES", "etapa": "Planejamento de Janela de Carregamento", "valor": row.get('dt_carregamento_plan')},
+                {"fase": "🟢 ANTES", "etapa": "Planejamento de Unitização / Estufagem no CD", "valor": row.get('dt_unitizacao_plan')},
+                {"fase": "🟢 ANTES", "etapa": "Conclusão do Picking / Carga Pronta na Calçada (WMS)", "valor": row.get('data_carga_pronta_wms')},
+                {"fase": "🟡 DURANTE", "etapa": "Conclusão de Unitização Física Interna (CD)", "valor": row.get('dt_unitizacao_real')},
+                {"fase": "🟡 DURANTE", "etapa": "Retirada / Coleta de Contêiner Vazio Realizada", "valor": row.get('dt_entrega_vazio_real')},
+                {"fase": "🟡 DURANTE", "etapa": "Chegada do Veículo na Fila da Portaria Externa", "valor": row.get('dt_chegada_fabrica')},
+                {"fase": "🟡 DURANTE", "etapa": "Entrada na Fábrica e Acoplamento na Doca", "valor": row.get('dt_entrada_fabrica')},
+                {"fase": "🟡 DURANTE", "etapa": "Fim do Carregamento Físico e Estufagem do Veículo", "valor": row.get('dt_carregamento_real')},
+                {"fase": "🔵 DEPOIS", "etapa": "Liberação e Faturamento Fiscal das Lojas/Clientes", "valor": row.get('data_faturamento_wms')},
+                {"fase": "🔵 DEPOIS", "etapa": "Saída da Portaria Fábrica (Início Trânsito Fronteira/Porto)", "valor": row.get('dt_saida_fabrica')},
             ]
-            h = ""
+            
+            h1 = ""
             for m in marcos_patio:
                 d = fmt_dt(m["valor"])
                 txt_d = d.strftime('%d/%m/%Y às %H:%M') if d else None
-                h += f"<tr><td class='{'status-ok' if txt_d else 'status-wait'}'>{'✅' if txt_d else '⏳'}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{f'<span class=\"date-text\">{txt_d}</span>' if txt_d else '<span class=\"pending-text\">Aguardando Processo</span>'}</td></tr>"
-            st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO OPERACIONAL (CD & PÁTIO)</th><th style="width:40%;">DATA / HORA REALIZADO</th></tr>{h}</table>', unsafe_allow_html=True)
+                icone = '✅' if txt_d else '⏳'
+                classe_status = 'status-ok' if txt_d else 'status-wait'
+                txt_data_exibida = f'<span class="date-text">{txt_d}</span>' if txt_d else '<span class="pending-text">Aguardando Processo</span>'
+                # Construção em linha única contínua sem espaços na esquerda para travar o renderizador HTML
+                h1 += f"<tr><td style='font-weight:bold; color:#1e3a8a;'>{m['fase']}</td><td class='{classe_status}'>{icone}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{txt_data_exibida}</td></tr>"
+                
+            st.markdown(f'<table class="wf-table"><tr><th style="width:15%;">ESTÁGIO</th><th style="width:10%; text-align:center;">STATUS</th><th style="width:45%;">MARCO OPERACIONAL DO PERCURSO</th><th style="width:30%;">DATA / HORA REALIZADO</th></tr>{h1}</table>', unsafe_allow_html=True)
 
         with t2:
             marcos_pco = [
-                {"etapa": "Gatilho de Emissão Fiscal (Data Faturamento)", "valor": row.get('data_real_faturamento')},
+                {"etapa": "Gatilho de Emissão Fiscal (Data Faturamento Real)", "valor": row.get('data_real_faturamento')},
                 {"etapa": "Data Limite Regulamentar para Envio do Draft (SLA)", "valor": row.get('dt_deadline_draft')},
             ]
-            h = ""
+            h2 = ""
             for m in marcos_pco:
                 d = fmt_dt(m["valor"])
                 txt_d = d.strftime('%d/%m/%Y às %H:%M') if d else None
-                h += f"<tr><td class='{'status-ok' if txt_d else 'status-wait'}'>{'✅' if txt_d else '⏳'}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{f'<span class=\"date-text\">{txt_d}</span>' if txt_d else '<span class=\"pending-text\">Pendente / Em Trâmite</span>'}</td></tr>"
-            st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO REGULAMENTAR & FISCAL</th><th style="width:40%;">DATA / HORA REALIZADO</th></tr>{h}</table>', unsafe_allow_html=True)
+                icone = '✅' if txt_d else '⏳'
+                classe_status = 'status-ok' if txt_d else 'status-wait'
+                txt_data_exibida = f'<span class="date-text">{txt_d}</span>' if txt_d else '<span class="pending-text">Pendente / Em Trâmite</span>'
+                h2 += f"<tr><td class='{classe_status}'>{icone}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{txt_data_exibida}</td></tr>"
+                
+            st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO REGULAMENTAR & FISCAL</th><th style="width:40%;">DATA / HORA REALIZADO</th></tr>{h2}</table>', unsafe_allow_html=True)
 
         with t3:
-            h = ""
+            h3 = ""
             if is_maritimo:
                 marcos_porto = [
                     {"etapa": "Saída da Portaria Fábrica (Trânsito Porto)", "valor": row.get('dt_saida_fabrica')},
@@ -340,8 +302,11 @@ else:
                 for m in marcos_porto:
                     d = fmt_dt(m["valor"])
                     txt_d = d.strftime('%d/%m/%Y às %H:%M') if d else None
-                    h += f"<tr><td class='{'status-ok' if txt_d else 'status-wait'}'>{'✅' if txt_d else '⏳'}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{f'<span class=\"date-text\">{txt_d}</span>' if txt_d else '<span class=\"pending-text\">Aguardando Chegada no Porto</span>'}</td></tr>"
-                st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO PORTUÁRIO MARÍTIMO</th><th style="width:40%;">DATA / HORA REALIZADO</th></tr>{h}</table>', unsafe_allow_html=True)
+                    icone = '✅' if txt_d else '⏳'
+                    classe_status = 'status-ok' if txt_d else 'status-wait'
+                    txt_data_exibida = f'<span class="date-text">{txt_d}</span>' if txt_d else '<span class="pending-text">Aguardando Chegada no Porto</span>'
+                    h3 += f"<tr><td class='{classe_status}'>{icone}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{txt_data_exibida}</td></tr>"
+                st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO PORTUÁRIO MARÍTIMO</th><th style="width:40%;">DATA / HORA REALIZADO</th></tr>{h3}</table>', unsafe_allow_html=True)
             else:
                 marcos_terrestre = [
                     {"etapa": "Saída da Portaria Fábrica (Início Trânsito Fronteira)", "valor": row.get('dt_saida_fabrica')},
@@ -349,9 +314,12 @@ else:
                 for m in marcos_terrestre:
                     d = fmt_dt(m["valor"])
                     txt_d = d.strftime('%d/%m/%Y às %H:%M') if d else None
-                    h += f"<tr><td class='{'status-ok' if txt_d else 'status-wait'}'>{'✅' if txt_d else '⏳'}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{f'<span class=\"date-text\">{txt_d}</span>' if txt_d else '<span class=\"pending-text\">Aguardando Saída</span>'}</td></tr>"
+                    icone = '✅' if txt_d else '⏳'
+                    classe_status = 'status-ok' if txt_d else 'status-wait'
+                    txt_data_exibida = f'<span class="date-text">{txt_d}</span>' if txt_d else '<span class="pending-text">Aguardando Saída</span>'
+                    h3 += f"<tr><td class='{classe_status}'>{icone}</td><td style='font-weight:600;'>{m['etapa']}</td><td>{txt_data_exibida}</td></tr>"
                 
-                h += f"<tr><td class='status-ok'>✅</td><td style='font-weight:600;'>Liberação de Trânsito Terrestre Internacional</td><td><span class='date-text'>Isento de Deadlines de Navio / Fluxo Direto Fronteira</span></td></tr>"
-                st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO LOGÍSTICO TERRESTRE</th><th style="width:40%;">STATUS / FLUXO EM FRONTEIRA</th></tr>{h}</table>', unsafe_allow_html=True)
+                h3 += f"<tr><td class='status-ok'>✅</td><td style='font-weight:600;'>Liberação de Trânsito Terrestre Internacional</td><td><span class='date-text'>Isento de Deadlines de Navio / Fluxo Direto Fronteira</span></td></tr>"
+                st.markdown(f'<table class="wf-table"><tr><th style="width:10%; text-align:center;">STATUS</th><th style="width:50%;">MARCO LOGÍSTICO TERRESTRE</th><th style="width:40%;">STATUS / FLUXO EM FRONTEIRA</th></tr>{h3}</table>', unsafe_allow_html=True)
 
         st.markdown("<br><div style='border-top:1px dashed #cbd5e1; margin:10px 0;'></div>", unsafe_allow_html=True)
