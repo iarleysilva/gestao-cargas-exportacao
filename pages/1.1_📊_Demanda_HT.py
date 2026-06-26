@@ -118,17 +118,22 @@ if df is not None:
         st.markdown("### ⏱ ...")
         st.markdown("### ⏱️ Governança de Pátio e Validação de Turnos (Hoje)")
         
-        # Recuperação das capacidades padrão do PCO
-        ciclos_t1 = tracking_pco.get(('HT', '1', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '1.0', 'CICLOS', 'POR_TURNO'), 4))
-        rend_t1 = tracking_pco.get(('HT', '1', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '1.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 27))
-        estimativa_t1 = ciclos_t1 * rend_t1 
+        # ─── CORREÇÃO DE GOVERNANÇA: AMARRAÇÃO DIRETA COM AS CHAVES OPERACIONAIS DO PCO ───
+        # Recuperação da parametrização mestre de ciclos e rendimento cadastrados em 0.1
+        ciclos_pco = tracking_pco.get(('HT', '1', 'CICLOS', 'POR_TURNO'), 4)
+        rend_pco = tracking_pco.get(('HT', '1', 'RENDIMENTO', 'PLTS_POR_CICLO'), 27)
 
-        ciclos_t2 = tracking_pco.get(('HT', '2', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '2.0', 'CICLOS', 'POR_TURNO'), 4))
-        rend_t2 = tracking_pco.get(('HT', '2', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '2.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
-        estimativa_t2 = ciclos_t2 * rend_t2 
+        # Como a estufa possui capacidade física igual entre turnos, todos herdam a mesma parametrização mestre
+        ciclos_t1 = ciclos_pco
+        rend_t1 = rend_pco
+        estimativa_t1 = ciclos_t1 * rend_t1
 
-        ciclos_t3 = tracking_pco.get(('HT', '3', 'CICLOS', 'POR_TURNO'), tracking_pco.get(('HT', '3.0', 'CICLOS', 'POR_TURNO'), 4))
-        rend_t3 = tracking_pco.get(('HT', '3', 'RENDIMENTO', 'PLTS_POR_CICLO'), tracking_pco.get(('HT', '3.0', 'RENDIMENTO', 'PLTS_POR_CICLO'), 25))
+        ciclos_t2 = ciclos_pco
+        rend_t2 = rend_pco
+        estimativa_t2 = ciclos_t2 * rend_t2
+
+        ciclos_t3 = ciclos_pco
+        rend_t3 = rend_pco
         estimativa_t3 = ciclos_t3 * rend_t3
         
         # 🛡️ FIX DO RECONHECIMENTO DE TURNOS (DADO CONECTADO COM A PERFORMANCE 3.1)

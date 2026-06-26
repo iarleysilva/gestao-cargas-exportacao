@@ -40,9 +40,11 @@ if df_demanda is None:
     st.error("⚠️ Erro ao conectar ou extrair os dados da planilha de demandas.")
     st.stop()
 
-# ─── 2. PADRONIZAÇÃO DO PERCURSO (CHAVE ÚNICA DE MATCH) ───
+# ─── 2. PADRONIZAÇÃO DO PERCURSO E TURNOS (CHAVE ÚNICA ANTI-ERRO DO PCP) ───
 df_demanda['PERCURSO'] = df_demanda['PERCURSO'].astype(str).str.strip().str.replace('.0', '', regex=False)
 df_demanda['DT_SEQUENCIADO'] = pd.to_datetime(df_demanda['DT_SEQUENCIADO'], errors='coerce')
+if df_demanda is not None and not df_demanda.empty:
+    df_demanda['TURNO_ALOCADO'] = df_demanda['TURNO_ALOCADO'].astype(str).str.strip().str.replace('.0', '', regex=False)
 
 # Cria o conjunto de busca cega para saber onde o percurso foi localizado
 percursos_bipados_fabrica = set(df_execucao['PERCURSO'].dropna().unique()) if df_execucao is not None else set()
